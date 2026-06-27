@@ -22,20 +22,20 @@ export type CleaningTask = {
 export type FireZone = {
   id: string;
   name: string;
-  location: string;
+  callPoint: string;
+  description: string;
 };
 
 export type StaffGuardRemote = {
   id: string;
   name: string;
-  location: string;
 };
 
 export type FoodProduct = {
   id: string;
   name: string;
   minTemp: number;
-  targetTemp: number;
+  maxTemp: number;
 };
 
 export type ColdUnit = {

@@ -105,7 +105,7 @@ export function coldUnitStatus(unit: ColdUnit, value: number) {
 }
 
 export function foodStatus(product: FoodProduct, value: number) {
-  return value >= product.minTemp ? "ok" : "warning";
+  return value >= product.minTemp && value <= product.maxTemp ? "ok" : "warning";
 }
 
 export function buildAlerts(state: SiteState) {
@@ -128,7 +128,7 @@ export function buildAlerts(state: SiteState) {
   if (nextFire) {
     alerts.push({
       title: "Fire alarm weekly zone due",
-      detail: `${nextFire.name} - ${nextFire.location} is available for this week's check.`,
+      detail: `${nextFire.name} - ${nextFire.callPoint} is available for this week's check.`,
       severity: "medium"
     });
   }
@@ -141,7 +141,7 @@ export function buildAlerts(state: SiteState) {
   if (nextRemote) {
     alerts.push({
       title: "StaffGuard weekly remote due",
-      detail: `${nextRemote.name} at ${nextRemote.location} is available for this week's check.`,
+      detail: `${nextRemote.name} is available for this week's check.`,
       severity: "medium"
     });
   }

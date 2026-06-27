@@ -32,7 +32,8 @@ create table public.cleaning_tasks (
 create table public.fire_zones (
   id uuid primary key default gen_random_uuid(),
   name text not null,
-  location text not null,
+  call_point text not null,
+  description text not null,
   active boolean not null default true,
   sort_order integer not null default 0,
   created_at timestamptz not null default now()
@@ -41,7 +42,6 @@ create table public.fire_zones (
 create table public.staffguard_remotes (
   id uuid primary key default gen_random_uuid(),
   name text not null,
-  location text not null,
   active boolean not null default true,
   sort_order integer not null default 0,
   created_at timestamptz not null default now()
@@ -51,7 +51,7 @@ create table public.food_products (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   min_temp numeric(5, 2) not null default 75,
-  target_temp numeric(5, 2) not null default 82,
+  max_temp numeric(5, 2) not null default 99,
   active boolean not null default true,
   created_at timestamptz not null default now()
 );

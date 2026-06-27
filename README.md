@@ -8,11 +8,12 @@ A Vercel and Supabase-ready Next.js project for managing daily and weekly venue 
 - Starter management account: Faith Shea, PIN `123456`.
 - Starter staff account: Alyssa Stoker, PIN `123456`.
 - Management dashboard with active alerts, live activity, and key site status.
-- Management settings page for cleaning tasks, fire zones, StaffGuard remotes, food products, fridge/freezer units, and staff/management accounts.
+- Management settings page for cleaning tasks, fire alarm zones and call points, StaffGuard remotes, food products, fridge/freezer units, and staff/management accounts.
 - Staff phone view for cleaning evidence, weekly fire alarm checks, weekly StaffGuard checks, food probe temperatures, and fridge/freezer temperatures.
 - Weekly rotation logic so only the next uncompleted fire zone and StaffGuard remote are available.
 - Anomaly detection for unsafe food temperatures and out-of-range cold-storage temperatures.
 - Twice-daily fridge/freezer tracking for morning and evening checks.
+- Food product setup uses minimum and maximum safe temperature ranges.
 - Supabase schema with starter tables, row level security policies, and review/corrective-action fields.
 
 ## Local routes

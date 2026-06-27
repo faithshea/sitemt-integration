@@ -41,7 +41,7 @@ export function SiteManagementApp({ screen }: { screen: Screen }) {
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);
-    if (saved) setState(JSON.parse(saved) as SiteState);
+    if (saved) setState(normalizeSiteState(JSON.parse(saved) as SiteState));
     setReady(true);
   }, []);
 
@@ -59,16 +59,16 @@ export function SiteManagementApp({ screen }: { screen: Screen }) {
 
   return (
     <PinGate accounts={state.accounts} requiredRole={requiredRole}>
-      {(account) => {
+      {(account, logout) => {
         if (screen === "staff") {
-          return <StaffPage account={account} state={state} setState={setState} />;
+          return <StaffPage account={account} state={state} setState={setState} logout={logout} />;
         }
 
         if (screen === "settings") {
-          return <SettingsPage account={account} state={state} setState={setState} />;
+          return <SettingsPage account={account} state={state} setState={setState} logout={logout} />;
         }
 
-        return <ManagementPage account={account} state={state} />;
+        return <ManagementPage account={account} state={state} logout={logout} />;
       }}
     </PinGate>
   );
@@ -99,7 +99,7 @@ function PinGate({
 }: {
   accounts: Account[];
   requiredRole: AccountRole;
-  children: (account: Account) => React.ReactNode;
+  children: (account: Account, logout: () => void) => React.ReactNode;
 }) {
   const eligibleAccounts = accounts.filter(
     (account) => account.active && account.role === requiredRole
@@ -111,7 +111,9 @@ function PinGate({
   const sessionKey = `lol-site-session-${requiredRole}`;
 
   useEffect(() => {
-    const savedAccountId = window.sessionStorage.getItem(sessionKey);
+    const savedAccountId =
+      window.localStorage.getItem(sessionKey) ??
+      window.sessionStorage.getItem(sessionKey);
     const savedAccount = eligibleAccounts.find((item) => item.id === savedAccountId);
     if (savedAccount) setAccount(savedAccount);
   }, [eligibleAccounts, sessionKey]);
@@ -124,12 +126,20 @@ function PinGate({
       setPin("");
       return;
     }
+    window.localStorage.setItem(sessionKey, selected.id);
     window.sessionStorage.setItem(sessionKey, selected.id);
     setAccount(selected);
   };
 
+  const logout = () => {
+    window.localStorage.removeItem(sessionKey);
+    window.sessionStorage.removeItem(sessionKey);
+    setPin("");
+    setAccount(null);
+  };
+
   if (account) {
-    return <>{children(account)}</>;
+    return <>{children(account, logout)}</>;
   }
 
   return (
@@ -171,7 +181,15 @@ function PinGate({
   );
 }
 
-function ManagementPage({ account, state }: { account: Account; state: SiteState }) {
+function ManagementPage({
+  account,
+  state,
+  logout
+}: {
+  account: Account;
+  state: SiteState;
+  logout: () => void;
+}) {
   const alerts = useMemo(() => buildAlerts(state), [state]);
   const nextFireZone = nextWeeklyItem(state.fireZones, state.submissions, "fire");
   const nextRemote = nextWeeklyItem(
@@ -188,7 +206,7 @@ function ManagementPage({ account, state }: { account: Account; state: SiteState
   ];
 
   return (
-    <AppFrame account={account} active="dashboard">
+    <AppFrame account={account} active="dashboard" logout={logout}>
       <section className="dashboard-hero">
         <div>
           <p className="eyebrow">Live site overview</p>
@@ -247,8 +265,8 @@ function ManagementPage({ account, state }: { account: Account; state: SiteState
       </section>
 
       <section className="due-band">
-        <DueItem title="Fire alarm zone due" value={nextFireZone ? `${nextFireZone.name} - ${nextFireZone.location}` : "No zones set up"} />
-        <DueItem title="StaffGuard remote due" value={nextRemote ? `${nextRemote.name} - ${nextRemote.location}` : "No remotes set up"} />
+        <DueItem title="Fire alarm zone due" value={nextFireZone ? `${nextFireZone.name} - ${nextFireZone.callPoint}` : "No zones set up"} />
+        <DueItem title="StaffGuard remote due" value={nextRemote ? nextRemote.name : "No remotes set up"} />
       </section>
     </AppFrame>
   );
@@ -257,11 +275,13 @@ function ManagementPage({ account, state }: { account: Account; state: SiteState
 function StaffPage({
   account,
   state,
-  setState
+  setState,
+  logout
 }: {
   account: Account;
   state: SiteState;
   setState: React.Dispatch<React.SetStateAction<SiteState>>;
+  logout: () => void;
 }) {
   const [cleaningPhoto, setCleaningPhoto] = useState<Record<string, string>>({});
   const [flash, setFlash] = useState<Flash>(null);
@@ -303,7 +323,7 @@ function StaffPage({
       status,
       notes:
         status === "warning"
-          ? `Probe was ${value}C; minimum accepted temperature is ${product.minTemp}C.`
+          ? `Probe was ${value}C; expected range is ${product.minTemp}C to ${product.maxTemp}C.`
           : undefined
     });
     event.currentTarget.reset();
@@ -334,7 +354,7 @@ function StaffPage({
   };
 
   return (
-    <AppFrame account={account} active="staff">
+    <AppFrame account={account} active="staff" logout={logout}>
       <section className="staff-hero">
         <p className="eyebrow">Staff checks</p>
         <h1>What needs doing?</h1>
@@ -413,7 +433,7 @@ function StaffPage({
               <option value="">Choose product</option>
               {state.foodProducts.map((product) => (
                 <option key={product.id} value={product.id}>
-                  {product.name} - min {product.minTemp}C
+                  {product.name} - {product.minTemp}C to {product.maxTemp}C
                 </option>
               ))}
             </select>
@@ -448,11 +468,13 @@ function StaffPage({
 function SettingsPage({
   account,
   state,
-  setState
+  setState,
+  logout
 }: {
   account: Account;
   state: SiteState;
   setState: React.Dispatch<React.SetStateAction<SiteState>>;
+  logout: () => void;
 }) {
   const [flash, setFlash] = useState<Flash>(null);
 
@@ -477,7 +499,8 @@ function SettingsPage({
     const zone: FireZone = {
       id: makeId("fire"),
       name: String(form.get("name")),
-      location: String(form.get("location"))
+      callPoint: String(form.get("callPoint")),
+      description: String(form.get("description"))
     };
     setState((current) => ({ ...current, fireZones: [...current.fireZones, zone] }));
     setFlash({ tone: "success", text: "Fire zone added." });
@@ -489,8 +512,7 @@ function SettingsPage({
     const form = new FormData(event.currentTarget);
     const remote: StaffGuardRemote = {
       id: makeId("remote"),
-      name: String(form.get("name")),
-      location: String(form.get("location"))
+      name: String(form.get("name"))
     };
     setState((current) => ({
       ...current,
@@ -507,7 +529,7 @@ function SettingsPage({
       id: makeId("food"),
       name: String(form.get("name")),
       minTemp: Number(form.get("minTemp")),
-      targetTemp: Number(form.get("targetTemp"))
+      maxTemp: Number(form.get("maxTemp"))
     };
     setState((current) => ({ ...current, foodProducts: [...current.foodProducts, product] }));
     setFlash({ tone: "success", text: "Food product added." });
@@ -563,7 +585,7 @@ function SettingsPage({
   };
 
   return (
-    <AppFrame account={account} active="settings">
+    <AppFrame account={account} active="settings" logout={logout}>
       <section className="dashboard-hero">
         <div>
           <p className="eyebrow">Management setup</p>
@@ -595,18 +617,21 @@ function SettingsPage({
 
         <SettingsForm title="Fire alarm zone" onSubmit={addFireZone}>
           <input name="name" placeholder="Zone name" required />
-          <input name="location" placeholder="Location covered" required />
+          <input name="callPoint" placeholder="Call Point 1" required />
+          <textarea name="description" placeholder="Where is this call point located?" required />
         </SettingsForm>
 
         <SettingsForm title="StaffGuard remote" onSubmit={addRemote}>
           <input name="name" placeholder="Remote name" required />
-          <input name="location" placeholder="Kept at" required />
         </SettingsForm>
 
         <SettingsForm title="Food product" onSubmit={addFood}>
           <input name="name" placeholder="Product name" required />
-          <input name="minTemp" type="number" placeholder="Minimum C" defaultValue={75} required />
-          <input name="targetTemp" type="number" placeholder="Target C" defaultValue={82} required />
+          <input name="minTemp" type="number" step="0.1" placeholder="Minimum safe C" required />
+          <input name="maxTemp" type="number" step="0.1" placeholder="Maximum safe C" required />
+          <p className="helper-text">
+            Common UK limits: chilled foods are normally 8C or below, and hot-held foods are normally 63C or above.
+          </p>
         </SettingsForm>
 
         <SettingsForm title="Staff or management account" onSubmit={addAccount}>
@@ -642,10 +667,12 @@ function SettingsPage({
 function AppFrame({
   account,
   active,
+  logout,
   children
 }: {
   account: Account;
   active: "dashboard" | "staff" | "settings";
+  logout: () => void;
   children: React.ReactNode;
 }) {
   return (
@@ -671,7 +698,12 @@ function AppFrame({
             </Link>
           )}
         </div>
-        <div className="user-chip">{account.name}</div>
+        <div className="user-area">
+          <span className="user-chip">{account.name}</span>
+          <button className="logout-button" type="button" onClick={logout}>
+            Log out
+          </button>
+        </div>
       </nav>
       {children}
     </main>
@@ -744,7 +776,7 @@ function WeeklyCheck({
     <article className="weekly-card">
       <div>
         <strong>{label}</strong>
-        <p>{item ? `${item.name} - ${item.location}` : emptyText}</p>
+        <p>{item ? describeWeeklyItem(item) : emptyText}</p>
       </div>
       <button
         disabled={!item}
@@ -813,4 +845,45 @@ function logsToday(submissions: Submission[]) {
       submittedAt.getDate() === today.getDate()
     );
   }).length;
+}
+
+function describeWeeklyItem(item: FireZone | StaffGuardRemote) {
+  if ("callPoint" in item) {
+    return `${item.name} - ${item.callPoint}: ${item.description}`;
+  }
+
+  return item.name;
+}
+
+function normalizeSiteState(state: SiteState): SiteState {
+  return {
+    ...initialSiteState,
+    ...state,
+    fireZones: (state.fireZones ?? []).map((zone) => ({
+      ...zone,
+      callPoint:
+        "callPoint" in zone && zone.callPoint
+          ? zone.callPoint
+          : "Call Point 1",
+      description:
+        "description" in zone && zone.description
+          ? zone.description
+          : "location" in zone
+            ? String(zone.location)
+            : ""
+    })),
+    staffGuardRemotes: (state.staffGuardRemotes ?? []).map((remote) => ({
+      id: remote.id,
+      name: remote.name
+    })),
+    foodProducts: (state.foodProducts ?? []).map((product) => ({
+      ...product,
+      maxTemp:
+        "maxTemp" in product && product.maxTemp !== undefined
+          ? product.maxTemp
+          : "targetTemp" in product
+            ? Number(product.targetTemp)
+            : product.minTemp
+    }))
+  };
 }
