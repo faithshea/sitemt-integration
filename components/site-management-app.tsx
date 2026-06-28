@@ -2076,14 +2076,25 @@ async function fetchRemoteState(sessionToken: string) {
 }
 
 async function saveRemoteState(state: SiteState, sessionToken: string) {
-  await fetch("/api/site", {
-    body: JSON.stringify({ state }),
-    headers: {
-      "Content-Type": "application/json",
-      "x-site-session": sessionToken
-    },
-    method: "PUT"
-  });
+  try {
+    const response = await fetch("/api/site", {
+      body: JSON.stringify({ state }),
+      headers: {
+        "Content-Type": "application/json",
+        "x-site-session": sessionToken
+      },
+      method: "PUT"
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      throw new Error(data?.error ?? "The change could not be saved.");
+    }
+  } catch (error) {
+    window.alert(
+      `This change did not save to Supabase. ${error instanceof Error ? error.message : "Please try again."}`
+    );
+  }
 }
 
 async function uploadCleaningPhoto(file: File, sessionToken: string) {

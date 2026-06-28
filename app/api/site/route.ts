@@ -114,34 +114,35 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const session = await requireSession(request);
+  try {
+    const session = await requireSession(request);
 
-  if ("error" in session) return session.error;
+    if ("error" in session) return session.error;
 
-  const { supabase, account } = session;
-  const body = await request.json();
-  const state = (body.state ?? emptySiteState()) as SiteState;
-  const isManagement = account.role === "management";
+    const { supabase, account } = session;
+    const body = await request.json();
+    const state = (body.state ?? emptySiteState()) as SiteState;
+    const isManagement = account.role === "management";
 
-  const accounts = state.accounts ?? [];
+    const accounts = state.accounts ?? [];
 
-  if (isManagement) {
-    await saveManagementState(state);
-  }
+    if (isManagement) {
+      await saveManagementState(state);
+    }
 
-  await upsertRows(
-    "check_submissions",
-    state.submissions.map((submission) => submissionToRow(submission, accounts))
-  );
-  await upsertRows("issues", state.issues.map((issue) => issueToRow(issue, accounts)));
+    await upsertRows(
+      "check_submissions",
+      state.submissions.map((submission) => submissionToRow(submission, accounts))
+    );
+    await upsertRows("issues", state.issues.map((issue) => issueToRow(issue, accounts)));
 
-  if (isManagement) {
-    await upsertRows("handovers", state.handovers.map((handover) => handoverToRow(handover, accounts)));
-  }
+    if (isManagement) {
+      await upsertRows("handovers", state.handovers.map((handover) => handoverToRow(handover, accounts)));
+    }
 
-  return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true });
 
-  async function saveManagementState(nextState: SiteState) {
+    async function saveManagementState(nextState: SiteState) {
     await saveAccounts(nextState.accounts);
     await upsertRows("cleaning_tasks", nextState.cleaningTasks.map(cleaningTaskToRow));
     await deleteMissingRows("cleaning_tasks", nextState.cleaningTasks.map((task) => task.id));
@@ -152,7 +153,7 @@ export async function PUT(request: Request) {
     await upsertRows("routine_tasks", nextState.routineTasks.map(routineTaskToRow));
   }
 
-  async function saveAccounts(nextAccounts: Account[]) {
+    async function saveAccounts(nextAccounts: Account[]) {
     for (const item of nextAccounts) {
       const row = item.pin
         ? { ...accountToRow(item), pin_hash: "pending-pin-reset" }
@@ -172,7 +173,7 @@ export async function PUT(request: Request) {
     }
   }
 
-  async function upsertRows(table: string, rows: Record<string, unknown>[]) {
+    async function upsertRows(table: string, rows: Record<string, unknown>[]) {
     if (rows.length === 0) return;
 
     const { error } = await supabase.from(table).upsert(rows);
@@ -180,7 +181,7 @@ export async function PUT(request: Request) {
     if (error) throw new Error(error.message);
   }
 
-  async function deleteMissingRows(table: string, idsToKeep: string[]) {
+    async function deleteMissingRows(table: string, idsToKeep: string[]) {
     const query =
       idsToKeep.length === 0
         ? supabase.from(table).delete().neq("id", "00000000-0000-0000-0000-000000000000")
@@ -188,5 +189,9 @@ export async function PUT(request: Request) {
     const { error } = await query;
 
     if (error) throw new Error(error.message);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not save to Supabase.";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
