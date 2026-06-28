@@ -437,12 +437,12 @@ function ManagementPage({
       </section>
 
       <section className="account-panel">
-        <PanelTitle title="Reports" detail="CSV export" />
+        <PanelTitle title="Reports" detail="Excel export" />
         <div className="report-actions">
-          <button type="button" onClick={() => exportSubmissions(state)}>
+          <button type="button" onClick={() => void exportSubmissions(state)}>
             Export check logs
           </button>
-          <button type="button" onClick={() => exportIssues(state)}>
+          <button type="button" onClick={() => void exportIssues(state)}>
             Export issue log
           </button>
         </div>
@@ -1129,12 +1129,12 @@ function SettingsPage({
 
       {tab === "reports" ? (
         <section className="account-panel">
-          <PanelTitle title="Reports" detail="CSV export" />
+          <PanelTitle title="Reports" detail="Excel export" />
           <div className="report-actions">
-            <button type="button" onClick={() => exportSubmissions(state)}>
+            <button type="button" onClick={() => void exportSubmissions(state)}>
               Export check logs
             </button>
-            <button type="button" onClick={() => exportIssues(state)}>
+            <button type="button" onClick={() => void exportIssues(state)}>
               Export issue log
             </button>
           </div>
@@ -1714,53 +1714,146 @@ function periodStart(frequency: "daily" | "weekly" | "monthly") {
   return new Date(new Date().setHours(0, 0, 0, 0));
 }
 
-function exportSubmissions(state: SiteState) {
+async function exportSubmissions(state: SiteState) {
   const rows = state.submissions.map((submission) => ({
-    area: areaLabels[submission.area],
-    item: submission.itemName,
-    staff: submission.staffName,
-    submittedAt: submission.submittedAt,
-    value: submission.value ?? "",
-    status: submission.status,
-    notes: submission.notes ?? "",
-    missedReason: submission.missedReason ?? "",
-    reviewedBy: submission.reviewedBy ?? "",
-    reviewedAt: submission.reviewedAt ?? "",
-    correctiveAction: submission.correctiveAction ?? ""
+    Area: areaLabels[submission.area],
+    Item: submission.itemName,
+    Staff: submission.staffName,
+    Submitted: readableDate(submission.submittedAt),
+    Value: submission.value ?? "",
+    Shift: submission.shift ?? "",
+    Status: submission.status,
+    Notes: submission.notes ?? "",
+    "Missed reason": submission.missedReason ?? "",
+    "Reviewed by": submission.reviewedBy ?? "",
+    "Reviewed at": submission.reviewedAt ? readableDate(submission.reviewedAt) : "",
+    "Corrective action": submission.correctiveAction ?? ""
   }));
-  downloadCsv("lol-check-logs.csv", rows);
+
+  await downloadWorkbook({
+    filename: "lol-check-logs.xlsx",
+    title: "LOL Bingo & Slots Southport - Check Logs",
+    sheets: [
+      {
+        name: "Summary",
+        rows: [
+          { Metric: "Total logs", Value: state.submissions.length },
+          { Metric: "Warnings", Value: state.submissions.filter((item) => item.status === "warning").length },
+          { Metric: "Missed checks", Value: state.submissions.filter((item) => item.status === "missed").length },
+          { Metric: "Unreviewed warnings", Value: state.submissions.filter((item) => item.status === "warning" && !item.reviewedAt).length },
+          { Metric: "Generated", Value: readableDate(new Date().toISOString()) }
+        ]
+      },
+      {
+        name: "Check Logs",
+        rows
+      }
+    ]
+  });
 }
 
-function exportIssues(state: SiteState) {
+async function exportIssues(state: SiteState) {
   const rows = state.issues.map((issue) => ({
-    title: issue.title,
-    detail: issue.detail,
-    priority: issue.priority,
-    status: issue.status,
-    reportedBy: issue.reportedBy,
-    createdAt: issue.createdAt,
-    resolvedAt: issue.resolvedAt ?? "",
-    resolution: issue.resolution ?? ""
+    Title: issue.title,
+    Detail: issue.detail,
+    Priority: issue.priority,
+    Status: issue.status,
+    "Reported by": issue.reportedBy,
+    Created: readableDate(issue.createdAt),
+    Resolved: issue.resolvedAt ? readableDate(issue.resolvedAt) : "",
+    Resolution: issue.resolution ?? ""
   }));
-  downloadCsv("lol-issue-log.csv", rows);
+
+  await downloadWorkbook({
+    filename: "lol-issue-log.xlsx",
+    title: "LOL Bingo & Slots Southport - Issue Log",
+    sheets: [
+      {
+        name: "Summary",
+        rows: [
+          { Metric: "Open issues", Value: state.issues.filter((item) => item.status === "open").length },
+          { Metric: "Resolved issues", Value: state.issues.filter((item) => item.status === "resolved").length },
+          { Metric: "High priority", Value: state.issues.filter((item) => item.priority === "high").length },
+          { Metric: "Generated", Value: readableDate(new Date().toISOString()) }
+        ]
+      },
+      {
+        name: "Issue Log",
+        rows
+      }
+    ]
+  });
 }
 
-function downloadCsv(filename: string, rows: Record<string, string | number>[]) {
-  if (rows.length === 0) {
-    rows = [{ message: "No records yet" }];
-  }
+async function downloadWorkbook({
+  filename,
+  title,
+  sheets
+}: {
+  filename: string;
+  title: string;
+  sheets: { name: string; rows: Record<string, string | number>[] }[];
+}) {
+  const ExcelJS = await import("exceljs");
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "LOL Bingo & Slots Southport";
+  workbook.created = new Date();
 
-  const headers = Object.keys(rows[0]);
-  const csv = [
-    headers.join(","),
-    ...rows.map((row) =>
-      headers
-        .map((header) => `"${String(row[header] ?? "").replaceAll('"', '""')}"`)
-        .join(",")
-    )
-  ].join("\n");
+  sheets.forEach((sheet) => {
+    const rows = sheet.rows.length > 0 ? sheet.rows : [{ Message: "No records yet" }];
+    const headers = Object.keys(rows[0]);
+    const worksheet = workbook.addWorksheet(sheet.name, {
+      views: [{ state: "frozen", ySplit: 3 }]
+    });
 
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    worksheet.mergeCells(1, 1, 1, Math.max(headers.length, 2));
+    const titleCell = worksheet.getCell(1, 1);
+    titleCell.value = sheet.name === "Summary" ? title : `${title} - ${sheet.name}`;
+    titleCell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 15 };
+    titleCell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF2E1C42" }
+    };
+    titleCell.alignment = { vertical: "middle" };
+    worksheet.getRow(1).height = 26;
+
+    worksheet.addRow([]);
+    const headerRow = worksheet.addRow(headers);
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF6D2F8F" }
+      };
+      cell.alignment = { vertical: "middle", wrapText: true };
+      cell.border = { bottom: { style: "thin", color: { argb: "FFE9E2EF" } } };
+    });
+
+    rows.forEach((row) => {
+      const added = worksheet.addRow(headers.map((header) => row[header] ?? ""));
+      added.eachCell((cell) => {
+        cell.alignment = { vertical: "top", wrapText: true };
+        cell.border = { bottom: { style: "thin", color: { argb: "FFF1ECF5" } } };
+      });
+    });
+
+    worksheet.columns = headers.map((header) => ({
+      key: header,
+      width: Math.min(Math.max(header.length + 6, 16), header.includes("Detail") || header.includes("Notes") || header.includes("action") ? 42 : 26)
+    }));
+
+    worksheet.autoFilter = {
+      from: { row: 3, column: 1 },
+      to: { row: 3, column: headers.length }
+    };
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
