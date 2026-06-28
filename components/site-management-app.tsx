@@ -52,7 +52,7 @@ type StaffSection =
   | "missed"
   | "issue";
 type Flash = { tone: "success" | "warning"; text: string } | null;
-type DashboardFilter = "today" | "week" | "warnings" | "missed" | "unreviewed";
+type DashboardFilter = "today" | "week" | "warnings" | "missed" | "unreviewed" | "evidence";
 type SettingsTab = "setup" | "accounts" | "active" | "reports";
 type StateSetter = React.Dispatch<React.SetStateAction<SiteState>>;
 
@@ -342,6 +342,7 @@ function ManagementPage({
   );
   const openIssues = state.issues.filter((issue) => issue.status === "open");
   const latestHandover = state.handovers[0];
+  const photoSubmissions = state.submissions.filter((submission) => submission.photoName);
   const stats = [
     { label: "Open alerts", value: alerts.length },
     { label: "Tasks due", value: countDueCleaning(state.cleaningTasks, state.submissions) },
@@ -482,6 +483,44 @@ function ManagementPage({
         <DueItem title="StaffGuard remote due" value={nextRemote ? nextRemote.name : "No remotes set up"} />
         <DueItem title="Open issues" value={String(openIssues.length)} />
         <DueItem title="Latest handover" value={latestHandover ? readableDate(latestHandover.createdAt) : "No handover yet"} />
+      </section>
+
+      <section className="management-layout secondary-layout">
+        <div className="live-panel">
+          <PanelTitle title="Evidence review" detail={`${photoSubmissions.length} photos`} />
+          {photoSubmissions.length === 0 ? (
+            <EmptyState title="No photos yet" text="Cleaning evidence will appear here after staff upload it." />
+          ) : (
+            <div className="evidence-grid">
+              {photoSubmissions.slice(0, 6).map((submission) => (
+                <article className="evidence-card" key={submission.id}>
+                  {submission.photoUrl ? <img alt={`Evidence for ${submission.itemName}`} src={submission.photoUrl} /> : null}
+                  <strong>{submission.itemName}</strong>
+                  <p>{submission.staffName} - {readableDate(submission.submittedAt)}</p>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <aside className="alert-box">
+          <PanelTitle title="Setup audit" detail={`${state.auditLogs.length} changes`} />
+          {state.auditLogs.length === 0 ? (
+            <EmptyState title="No setup changes yet" text="PIN resets and setup changes will appear here." />
+          ) : (
+            <div className="activity-list compact-list">
+              {state.auditLogs.slice(0, 8).map((log) => (
+                <article className="activity-item" key={log.id}>
+                  <div>
+                    <span>{log.action}</span>
+                    <strong>{log.detail}</strong>
+                    <p>{log.actorName} - {readableDate(log.createdAt)}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </aside>
       </section>
 
       <section className="management-layout secondary-layout">
@@ -821,6 +860,7 @@ function StaffPage({
             item={nextFireZone}
             emptyText="No fire zones are set up."
             area="fire"
+            submissions={state.submissions}
             staffName={account.name}
             addSubmission={addSubmission}
           />
@@ -831,6 +871,7 @@ function StaffPage({
             item={nextRemote}
             emptyText="No StaffGuard remotes are set up."
             area="staffguard"
+            submissions={state.submissions}
             staffName={account.name}
             addSubmission={addSubmission}
           />
@@ -880,19 +921,19 @@ function StaffPage({
         ) : null}
 
         {section === "opening" && account.permissions.canCompleteOpening ? (
-          <RoutineTaskSection title="Opening checks" tasks={openingTasks} empty="No opening checks set." onComplete={submitRoutineTask} />
+          <RoutineTaskSection title="Opening checks" tasks={openingTasks} submissions={state.submissions} empty="No opening checks set." onComplete={submitRoutineTask} />
         ) : null}
 
         {section === "closing" && account.permissions.canCompleteClosing ? (
-          <RoutineTaskSection title="Closing checks" tasks={closingTasks} empty="No closing checks set." onComplete={submitRoutineTask} />
+          <RoutineTaskSection title="Closing checks" tasks={closingTasks} submissions={state.submissions} empty="No closing checks set." onComplete={submitRoutineTask} />
         ) : null}
 
         {section === "safe" && account.permissions.canCompleteSafe ? (
-          <RoutineTaskSection title="Safe checks" tasks={safeTasks} empty="No safe checks set." onComplete={submitRoutineTask} />
+          <RoutineTaskSection title="Safe checks" tasks={safeTasks} submissions={state.submissions} empty="No safe checks set." onComplete={submitRoutineTask} />
         ) : null}
 
         {section === "management" && isManagerChecks ? (
-          <RoutineTaskSection title="Management checks" tasks={managementTasks} empty="No management checks set." onComplete={submitRoutineTask} />
+          <RoutineTaskSection title="Management checks" tasks={managementTasks} submissions={state.submissions} empty="No management checks set." onComplete={submitRoutineTask} />
         ) : null}
 
         {section === "missed" ? (
@@ -946,6 +987,23 @@ function SettingsPage({
 }) {
   const [flash, setFlash] = useState<Flash>(null);
   const [tab, setTab] = useState<SettingsTab>("setup");
+  const withAudit = (
+    current: SiteState,
+    action: string,
+    detail: string
+  ): SiteState => ({
+    ...current,
+    auditLogs: [
+      {
+        id: makeId("audit"),
+        actorName: account.name,
+        action,
+        detail,
+        createdAt: new Date().toISOString()
+      },
+      ...(current.auditLogs ?? [])
+    ].slice(0, 100)
+  });
 
   const addCleaningTask = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -958,7 +1016,13 @@ function SettingsPage({
       requiresPhoto: true,
       active: true
     };
-    setState((current) => ({ ...current, cleaningTasks: [...current.cleaningTasks, task] }));
+    setState((current) =>
+      withAudit(
+        { ...current, cleaningTasks: [...current.cleaningTasks, task] },
+        "Cleaning task added",
+        task.name
+      )
+    );
     setFlash({ tone: "success", text: "Cleaning task added." });
     event.currentTarget.reset();
   };
@@ -973,7 +1037,13 @@ function SettingsPage({
       description: String(form.get("description")),
       active: true
     };
-    setState((current) => ({ ...current, fireZones: [...current.fireZones, zone] }));
+    setState((current) =>
+      withAudit(
+        { ...current, fireZones: [...current.fireZones, zone] },
+        "Fire zone added",
+        `${zone.name} - ${zone.callPoint}`
+      )
+    );
     setFlash({ tone: "success", text: "Fire zone added." });
     event.currentTarget.reset();
   };
@@ -986,10 +1056,16 @@ function SettingsPage({
       name: String(form.get("name")),
       active: true
     };
-    setState((current) => ({
-      ...current,
-      staffGuardRemotes: [...current.staffGuardRemotes, remote]
-    }));
+    setState((current) =>
+      withAudit(
+        {
+          ...current,
+          staffGuardRemotes: [...current.staffGuardRemotes, remote]
+        },
+        "StaffGuard remote added",
+        remote.name
+      )
+    );
     setFlash({ tone: "success", text: "StaffGuard remote added." });
     event.currentTarget.reset();
   };
@@ -1004,7 +1080,13 @@ function SettingsPage({
       maxTemp: Number(form.get("maxTemp")),
       active: true
     };
-    setState((current) => ({ ...current, foodProducts: [...current.foodProducts, product] }));
+    setState((current) =>
+      withAudit(
+        { ...current, foodProducts: [...current.foodProducts, product] },
+        "Food product added",
+        product.name
+      )
+    );
     setFlash({ tone: "success", text: "Food product added." });
     event.currentTarget.reset();
   };
@@ -1020,7 +1102,13 @@ function SettingsPage({
       maxTemp: Number(form.get("maxTemp")),
       active: true
     };
-    setState((current) => ({ ...current, coldUnits: [...current.coldUnits, unit] }));
+    setState((current) =>
+      withAudit(
+        { ...current, coldUnits: [...current.coldUnits, unit] },
+        "Cold unit added",
+        unit.name
+      )
+    );
     setFlash({ tone: "success", text: "Fridge/freezer added." });
     event.currentTarget.reset();
   };
@@ -1036,7 +1124,13 @@ function SettingsPage({
       frequency: form.get("frequency") as RoutineTask["frequency"],
       active: true
     };
-    setState((current) => ({ ...current, routineTasks: [...current.routineTasks, task] }));
+    setState((current) =>
+      withAudit(
+        { ...current, routineTasks: [...current.routineTasks, task] },
+        "Checklist task added",
+        `${areaLabels[task.area]} - ${task.name}`
+      )
+    );
     setFlash({ tone: "success", text: "Check task added." });
     event.currentTarget.reset();
   };
@@ -1046,42 +1140,60 @@ function SettingsPage({
     const form = new FormData(event.currentTarget);
     const accountName = String(form.get("name"));
     const role = form.get("role") as AccountRole;
-    setState((current) => ({
-      ...current,
-      accounts: [
-        ...current.accounts,
+    setState((current) =>
+      withAudit(
         {
-          id: makeId("acct"),
-          name: accountName,
-          role,
-          pin: String(form.get("pin") || "123456"),
-          active: true,
-          permissions: permissionsForRole(role)
-        }
-      ]
-    }));
+          ...current,
+          accounts: [
+            ...current.accounts,
+            {
+              id: makeId("acct"),
+              name: accountName,
+              role,
+              pin: String(form.get("pin") || "123456"),
+              active: true,
+              permissions: permissionsForRole(role)
+            }
+          ]
+        },
+        "Account created",
+        `${accountName} (${role})`
+      )
+    );
     setFlash({ tone: "success", text: "Account created." });
     event.currentTarget.reset();
   };
 
   const regeneratePin = (accountId: string) => {
     const pin = String(Math.floor(100000 + Math.random() * 900000));
-    setState((current) => ({
-      ...current,
-      accounts: current.accounts.map((item) =>
-        item.id === accountId ? { ...item, pin } : item
+    setState((current) =>
+      withAudit(
+        {
+          ...current,
+          accounts: current.accounts.map((item) =>
+            item.id === accountId ? { ...item, pin } : item
+          )
+        },
+        "PIN generated",
+        current.accounts.find((item) => item.id === accountId)?.name ?? "Account"
       )
-    }));
+    );
     setFlash({ tone: "success", text: `New PIN generated: ${pin}` });
   };
 
   const toggleAccountActive = (accountId: string) => {
-    setState((current) => ({
-      ...current,
-      accounts: current.accounts.map((item) =>
-        item.id === accountId ? { ...item, active: !item.active } : item
+    setState((current) =>
+      withAudit(
+        {
+          ...current,
+          accounts: current.accounts.map((item) =>
+            item.id === accountId ? { ...item, active: !item.active } : item
+          )
+        },
+        "Account status changed",
+        current.accounts.find((item) => item.id === accountId)?.name ?? "Account"
       )
-    }));
+    );
   };
 
   const toggleAccountPermission = (
@@ -1108,19 +1220,31 @@ function SettingsPage({
     collection: "cleaningTasks" | "fireZones" | "staffGuardRemotes" | "foodProducts" | "coldUnits" | "routineTasks",
     itemId: string
   ) => {
-    setState((current) => ({
-      ...current,
-      [collection]: current[collection].map((item) =>
-        item.id === itemId ? { ...item, active: !item.active } : item
+    setState((current) =>
+      withAudit(
+        {
+          ...current,
+          [collection]: current[collection].map((item) =>
+            item.id === itemId ? { ...item, active: !item.active } : item
+          )
+        },
+        "Setup item changed",
+        current[collection].find((item) => item.id === itemId)?.name ?? collection
       )
-    }));
+    );
   };
 
   const removeCleaningTask = (taskId: string) => {
-    setState((current) => ({
-      ...current,
-      cleaningTasks: current.cleaningTasks.filter((task) => task.id !== taskId)
-    }));
+    setState((current) =>
+      withAudit(
+        {
+          ...current,
+          cleaningTasks: current.cleaningTasks.filter((task) => task.id !== taskId)
+        },
+        "Cleaning task removed",
+        current.cleaningTasks.find((task) => task.id === taskId)?.name ?? "Cleaning task"
+      )
+    );
     setFlash({ tone: "success", text: "Cleaning task removed." });
   };
 
@@ -1391,6 +1515,7 @@ function WeeklyCheck({
   item,
   emptyText,
   area,
+  submissions,
   staffName,
   addSubmission
 }: {
@@ -1398,14 +1523,18 @@ function WeeklyCheck({
   item: FireZone | StaffGuardRemote | null;
   emptyText: string;
   area: "fire" | "staffguard";
+  submissions: Submission[];
   staffName: string;
   addSubmission: (submission: Omit<Submission, "id" | "submittedAt">) => void;
 }) {
+  const latest = item ? latestSubmission(submissions, area, item.id) : undefined;
+
   return (
     <article className="weekly-card">
       <div>
         <strong>{label}</strong>
         <p>{item ? describeWeeklyItem(item) : emptyText}</p>
+        {item ? <small>Last completed: {readableDate(latest?.submittedAt)}</small> : null}
       </div>
       <button
         disabled={!item}
@@ -1430,11 +1559,13 @@ function WeeklyCheck({
 function RoutineTaskSection({
   title,
   tasks,
+  submissions,
   empty,
   onComplete
 }: {
   title: string;
   tasks: RoutineTask[];
+  submissions: Submission[];
   empty: string;
   onComplete: (task: RoutineTask) => void;
 }) {
@@ -1449,6 +1580,7 @@ function RoutineTaskSection({
               <div>
                 <strong>{task.name}</strong>
                 <p>{task.description}</p>
+                <small>Last completed: {readableDate(latestSubmission(submissions, task.area, task.id)?.submittedAt)}</small>
               </div>
               <button type="button" onClick={() => onComplete(task)}>
                 Done
@@ -1677,7 +1809,8 @@ const dashboardFilters: { key: DashboardFilter; label: string }[] = [
   { key: "week", label: "This week" },
   { key: "warnings", label: "Warnings" },
   { key: "missed", label: "Missed" },
-  { key: "unreviewed", label: "Unreviewed" }
+  { key: "unreviewed", label: "Unreviewed" },
+  { key: "evidence", label: "Evidence" }
 ];
 
 const settingsTabs: { key: SettingsTab; label: string }[] = [
@@ -1705,6 +1838,7 @@ function filterSubmissions(submissions: Submission[], filter: DashboardFilter) {
     if (filter === "week") return submittedAt >= week;
     if (filter === "warnings") return submission.status === "warning";
     if (filter === "missed") return submission.status === "missed";
+    if (filter === "evidence") return Boolean(submission.photoName);
     return (submission.status === "warning" || submission.status === "missed") && !submission.reviewedAt;
   });
 }
@@ -1828,7 +1962,8 @@ function availableMissableItems(state: SiteState, account: Account) {
       const allowed =
         (task.area === "opening" && account.permissions.canCompleteOpening) ||
         (task.area === "closing" && account.permissions.canCompleteClosing) ||
-        (task.area === "safe" && account.permissions.canCompleteSafe);
+        (task.area === "safe" && account.permissions.canCompleteSafe) ||
+        (task.area === "management" && account.permissions.canManageSettings);
       if (allowed) items.push({ area: task.area, id: task.id, name: task.name });
     });
 
@@ -1902,6 +2037,7 @@ async function exportSubmissions(state: SiteState) {
     Status: submission.status,
     Notes: submission.notes ?? "",
     "Missed reason": submission.missedReason ?? "",
+    "Photo evidence": submission.photoName ?? "",
     "Reviewed by": submission.reviewedBy ?? "",
     "Reviewed at": submission.reviewedAt ? readableDate(submission.reviewedAt) : "",
     "Corrective action": submission.correctiveAction ?? ""
@@ -2204,7 +2340,8 @@ function normalizeSiteState(state: SiteState): SiteState {
       active: task.active ?? true
     })),
     issues: state.issues ?? [],
-    handovers: state.handovers ?? []
+    handovers: state.handovers ?? [],
+    auditLogs: state.auditLogs ?? []
   };
 }
 

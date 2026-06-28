@@ -68,5 +68,6 @@ export const initialSiteState: SiteState = {
   routineTasks: [],
   submissions: [],
   issues: [],
-  handovers: []
+  handovers: [],
+  auditLogs: []
 };

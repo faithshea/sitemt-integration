@@ -2,6 +2,7 @@ import type {
   Account,
   AccountPermissions,
   AccountRole,
+  AuditLog,
   CleaningTask,
   ColdUnit,
   FireZone,
@@ -121,6 +122,7 @@ export function submissionFromRow(row: any): Submission {
     value: row.measured_value === null ? undefined : Number(row.measured_value),
     shift: row.shift ?? undefined,
     photoName: row.photo_path ?? undefined,
+    photoUrl: row.photo_url ?? undefined,
     notes: row.notes ?? undefined,
     status: row.status,
     missedReason: row.missed_reason ?? undefined,
@@ -150,6 +152,16 @@ export function handoverFromRow(row: any): Handover {
     managerName: row.manager_name,
     summary: row.summary,
     unresolvedNotes: row.unresolved_notes ?? "",
+    createdAt: row.created_at
+  };
+}
+
+export function auditLogFromRow(row: any): AuditLog {
+  return {
+    id: row.id,
+    actorName: row.actor_name,
+    action: row.action,
+    detail: row.detail,
     createdAt: row.created_at
   };
 }
@@ -282,6 +294,19 @@ export function handoverToRow(handover: Handover, accounts: Account[]) {
   };
 }
 
+export function auditLogToRow(log: AuditLog, accounts: Account[]) {
+  const actor = accounts.find((account) => account.name === log.actorName);
+
+  return {
+    id: log.id,
+    actor_account_id: actor?.id ?? null,
+    actor_name: log.actorName,
+    action: log.action,
+    detail: log.detail,
+    created_at: log.createdAt
+  };
+}
+
 export function emptySiteState(accounts: Account[] = []): SiteState {
   return {
     accounts,
@@ -293,6 +318,7 @@ export function emptySiteState(accounts: Account[] = []): SiteState {
     routineTasks: [],
     submissions: [],
     issues: [],
-    handovers: []
+    handovers: [],
+    auditLogs: []
   };
 }

@@ -408,12 +408,18 @@ p {
 
 .activity-list,
 .alert-list,
-.account-list {
+.account-list,
+.evidence-grid {
   display: grid;
   gap: 8px;
 }
 
+.evidence-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .activity-item,
+.evidence-card,
 .weekly-card,
 .staff-task,
 .account-row,
@@ -426,6 +432,39 @@ p {
   gap: 10px;
   grid-template-columns: 1fr auto;
   padding: 12px;
+}
+
+.evidence-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.evidence-card img {
+  aspect-ratio: 4 / 3;
+  border-radius: 6px;
+  display: block;
+  margin-bottom: 8px;
+  object-fit: cover;
+  width: 100%;
+}
+
+.evidence-card p,
+.evidence-card strong,
+.weekly-card small {
+  display: block;
+}
+
+.weekly-card small,
+.evidence-card p {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  margin-top: 4px;
+}
+
+.compact-list {
+  gap: 6px;
 }
 
 .staff-task {

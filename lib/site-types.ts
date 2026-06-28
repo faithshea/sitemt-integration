@@ -94,6 +94,7 @@ export type Submission = {
   value?: number;
   shift?: Shift;
   photoName?: string;
+  photoUrl?: string;
   notes?: string;
   status: "ok" | "warning" | "missed";
   missedReason?: string;
@@ -122,6 +123,14 @@ export type Handover = {
   createdAt: string;
 };
 
+export type AuditLog = {
+  id: string;
+  actorName: string;
+  action: string;
+  detail: string;
+  createdAt: string;
+};
+
 export type SiteState = {
   accounts: Account[];
   cleaningTasks: CleaningTask[];
@@ -133,4 +142,5 @@ export type SiteState = {
   submissions: Submission[];
   issues: Issue[];
   handovers: Handover[];
+  auditLogs: AuditLog[];
 };

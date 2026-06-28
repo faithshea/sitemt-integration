@@ -6,6 +6,7 @@ create schema if not exists extensions;
 create extension if not exists pgcrypto with schema extensions;
 
 drop table if exists public.handovers cascade;
+drop table if exists public.audit_logs cascade;
 drop table if exists public.issues cascade;
 drop table if exists public.check_submissions cascade;
 drop table if exists public.routine_tasks cascade;
@@ -174,6 +175,15 @@ create table public.handovers (
   created_at timestamptz not null default now()
 );
 
+create table public.audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  actor_account_id uuid references public.site_accounts(id) on delete set null,
+  actor_name text not null,
+  action text not null,
+  detail text not null,
+  created_at timestamptz not null default now()
+);
+
 create index site_accounts_role_active_idx on public.site_accounts(role, active);
 create index site_sessions_token_hash_idx on public.site_sessions(token_hash);
 create index site_sessions_account_idx on public.site_sessions(account_id);
@@ -183,6 +193,7 @@ create index check_submissions_status_idx
   on public.check_submissions(status)
   where status = 'warning';
 create index issues_status_priority_idx on public.issues(status, priority);
+create index audit_logs_created_idx on public.audit_logs(created_at desc);
 
 create or replace function public.touch_updated_at()
 returns trigger
@@ -233,6 +244,7 @@ alter table public.routine_tasks enable row level security;
 alter table public.check_submissions enable row level security;
 alter table public.issues enable row level security;
 alter table public.handovers enable row level security;
+alter table public.audit_logs enable row level security;
 
 revoke all on public.site_accounts from anon, authenticated;
 revoke all on public.site_sessions from anon, authenticated;
@@ -245,6 +257,7 @@ revoke all on public.routine_tasks from anon, authenticated;
 revoke all on public.check_submissions from anon, authenticated;
 revoke all on public.issues from anon, authenticated;
 revoke all on public.handovers from anon, authenticated;
+revoke all on public.audit_logs from anon, authenticated;
 
 create or replace function public.account_login_options(p_role public.user_role)
 returns table (

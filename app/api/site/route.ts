@@ -3,6 +3,8 @@ import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import {
   accountFromRow,
   accountToRow,
+  auditLogFromRow,
+  auditLogToRow,
   cleaningTaskFromRow,
   cleaningTaskToRow,
   coldUnitFromRow,
@@ -66,7 +68,8 @@ export async function GET(request: Request) {
     routineTasks,
     submissions,
     issues,
-    handovers
+    handovers,
+    auditLogs
   ] = await Promise.all([
     supabase.from("site_accounts").select("id, display_name, role, permissions, active").order("display_name"),
     supabase.from("cleaning_tasks").select("*").order("created_at"),
@@ -77,7 +80,8 @@ export async function GET(request: Request) {
     supabase.from("routine_tasks").select("*").order("created_at"),
     supabase.from("check_submissions").select("*").order("submitted_at", { ascending: false }),
     supabase.from("issues").select("*").order("created_at", { ascending: false }),
-    supabase.from("handovers").select("*").order("created_at", { ascending: false })
+    supabase.from("handovers").select("*").order("created_at", { ascending: false }),
+    supabase.from("audit_logs").select("*").order("created_at", { ascending: false }).limit(100)
   ]);
 
   const firstError = [
@@ -90,12 +94,29 @@ export async function GET(request: Request) {
     routineTasks,
     submissions,
     issues,
-    handovers
+    handovers,
+    auditLogs
   ].find((result) => result.error)?.error;
 
   if (firstError) {
     return NextResponse.json({ error: firstError.message }, { status: 500 });
   }
+
+  const mappedSubmissions = await Promise.all(
+    (submissions.data ?? []).map(async (row) => {
+      const submission = submissionFromRow(row);
+      if (!submission.photoName) return submission;
+
+      const { data } = await supabase.storage
+        .from("cleaning-evidence")
+        .createSignedUrl(submission.photoName, 60 * 60);
+
+      return {
+        ...submission,
+        photoUrl: data?.signedUrl
+      };
+    })
+  );
 
   const state: SiteState = {
     accounts: (accounts.data ?? []).map(accountFromRow),
@@ -105,9 +126,10 @@ export async function GET(request: Request) {
     foodProducts: (foodProducts.data ?? []).map(foodProductFromRow),
     coldUnits: (coldUnits.data ?? []).map(coldUnitFromRow),
     routineTasks: (routineTasks.data ?? []).map(routineTaskFromRow),
-    submissions: (submissions.data ?? []).map(submissionFromRow),
+    submissions: mappedSubmissions,
     issues: (issues.data ?? []).map(issueFromRow),
-    handovers: (handovers.data ?? []).map(handoverFromRow)
+    handovers: (handovers.data ?? []).map(handoverFromRow),
+    auditLogs: (auditLogs.data ?? []).map(auditLogFromRow)
   };
 
   return NextResponse.json({ state });
@@ -138,6 +160,7 @@ export async function PUT(request: Request) {
 
     if (isManagement) {
       await upsertRows("handovers", state.handovers.map((handover) => handoverToRow(handover, accounts)));
+      await upsertRows("audit_logs", state.auditLogs.map((log) => auditLogToRow(log, accounts)));
     }
 
     return NextResponse.json({ ok: true });
