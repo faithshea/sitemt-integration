@@ -1,7 +1,28 @@
-export type Area = "cleaning" | "fire" | "staffguard" | "food" | "cold";
+export type Area =
+  | "cleaning"
+  | "fire"
+  | "staffguard"
+  | "food"
+  | "cold"
+  | "opening"
+  | "closing"
+  | "safe";
 export type ColdUnitType = "fridge" | "freezer";
 export type Shift = "morning" | "evening";
-export type AccountRole = "management" | "staff";
+export type AccountRole = "dashboard" | "management" | "staff";
+
+export type AccountPermissions = {
+  canAccessDashboard: boolean;
+  canManageSettings: boolean;
+  canCompleteCleaning: boolean;
+  canCompleteFood: boolean;
+  canCompleteCold: boolean;
+  canCompleteFire: boolean;
+  canCompleteStaffGuard: boolean;
+  canCompleteOpening: boolean;
+  canCompleteClosing: boolean;
+  canCompleteSafe: boolean;
+};
 
 export type Account = {
   id: string;
@@ -9,6 +30,7 @@ export type Account = {
   role: AccountRole;
   pin: string;
   active: boolean;
+  permissions: AccountPermissions;
 };
 
 export type CleaningTask = {
@@ -17,6 +39,7 @@ export type CleaningTask = {
   area: string;
   frequency: "daily" | "weekly" | "monthly";
   requiresPhoto: boolean;
+  active: boolean;
 };
 
 export type FireZone = {
@@ -24,11 +47,13 @@ export type FireZone = {
   name: string;
   callPoint: string;
   description: string;
+  active: boolean;
 };
 
 export type StaffGuardRemote = {
   id: string;
   name: string;
+  active: boolean;
 };
 
 export type FoodProduct = {
@@ -36,6 +61,7 @@ export type FoodProduct = {
   name: string;
   minTemp: number;
   maxTemp: number;
+  active: boolean;
 };
 
 export type ColdUnit = {
@@ -44,6 +70,16 @@ export type ColdUnit = {
   type: ColdUnitType;
   minTemp: number;
   maxTemp: number;
+  active: boolean;
+};
+
+export type RoutineTask = {
+  id: string;
+  area: "opening" | "closing" | "safe";
+  name: string;
+  description: string;
+  frequency: "daily" | "weekly" | "monthly";
+  active: boolean;
 };
 
 export type Submission = {
@@ -57,7 +93,31 @@ export type Submission = {
   shift?: Shift;
   photoName?: string;
   notes?: string;
-  status: "ok" | "warning";
+  status: "ok" | "warning" | "missed";
+  missedReason?: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  correctiveAction?: string;
+};
+
+export type Issue = {
+  id: string;
+  title: string;
+  detail: string;
+  priority: "low" | "medium" | "high";
+  status: "open" | "resolved";
+  reportedBy: string;
+  createdAt: string;
+  resolvedAt?: string;
+  resolution?: string;
+};
+
+export type Handover = {
+  id: string;
+  managerName: string;
+  summary: string;
+  unresolvedNotes: string;
+  createdAt: string;
 };
 
 export type SiteState = {
@@ -67,5 +127,8 @@ export type SiteState = {
   staffGuardRemotes: StaffGuardRemote[];
   foodProducts: FoodProduct[];
   coldUnits: ColdUnit[];
+  routineTasks: RoutineTask[];
   submissions: Submission[];
+  issues: Issue[];
+  handovers: Handover[];
 };

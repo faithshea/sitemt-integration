@@ -5,11 +5,14 @@ A Vercel and Supabase-ready Next.js project for managing daily and weekly venue 
 ## What is included
 
 - Separate PIN-protected management and staff pages.
+- Permission-based accounts, so managers can use the dashboard and complete checks while staff can be limited to specific check types.
+- Dashboard Display starter account for a view-only dashboard screen.
 - Starter management account: Faith Shea, PIN `123456`.
 - Starter staff account: Alyssa Stoker, PIN `123456`.
 - Management dashboard with active alerts, live activity, and key site status.
-- Management settings page for cleaning tasks, fire alarm zones and call points, StaffGuard remotes, food products, fridge/freezer units, and staff/management accounts.
+- Management settings page for cleaning tasks, fire alarm zones and call points, StaffGuard remotes, food products, fridge/freezer units, opening/closing/safe checks, and accounts.
 - Staff phone view for cleaning evidence, weekly fire alarm checks, weekly StaffGuard checks, food probe temperatures, and fridge/freezer temperatures.
+- Missed-check reasons, staff issue reporting, manager corrective-action review, manager handovers, and CSV exports.
 - Weekly rotation logic so only the next uncompleted fire zone and StaffGuard remote are available.
 - Anomaly detection for unsafe food temperatures and out-of-range cold-storage temperatures.
 - Twice-daily fridge/freezer tracking for morning and evening checks.
@@ -21,6 +24,12 @@ A Vercel and Supabase-ready Next.js project for managing daily and weekly venue 
 - `/management` - management dashboard
 - `/management/settings` - management setup
 - `/staff` - staff checks
+
+## Account model
+
+Do not use a shared management account for real check completion. Keep every manager and staff member as a named account so the audit trail shows who completed or reviewed each item.
+
+The included `Dashboard Display` account is intended only for a shared screen that shows the dashboard. Named management accounts should be used for settings, completing checks, corrective actions, handovers, and reviews.
 
 ## Recommended extra features
 

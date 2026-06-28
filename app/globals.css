@@ -376,7 +376,8 @@ p {
 
 .activity-list,
 .alert-list,
-.account-list {
+.account-list,
+.task-list {
   display: grid;
   gap: 10px;
 }
@@ -384,7 +385,9 @@ p {
 .activity-item,
 .weekly-card,
 .staff-task,
-.account-row {
+.account-row,
+.review-card,
+.setup-row {
   align-items: center;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -401,8 +404,46 @@ p {
 .activity-item p,
 .weekly-card p,
 .staff-task p,
-.account-row p {
+.account-row p,
+.review-card p {
   margin-bottom: 0;
+}
+
+.secondary-layout {
+  margin-top: 14px;
+}
+
+.review-card {
+  align-items: stretch;
+  grid-template-columns: 1fr;
+}
+
+.inline-form,
+.handover-form,
+.report-actions,
+.row-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.inline-form {
+  grid-template-columns: 1fr auto;
+}
+
+.handover-form {
+  grid-template-columns: 1fr 1fr auto;
+}
+
+.handover-preview {
+  background: #fbf8ff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-top: 12px;
+  padding: 14px;
+}
+
+.report-actions {
+  grid-template-columns: repeat(2, max-content);
 }
 
 .pill {
@@ -480,6 +521,57 @@ p {
   margin-top: 14px;
 }
 
+.permission-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.permission-grid label {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 0.9rem;
+  font-weight: 800;
+  gap: 8px;
+}
+
+.permission-grid input {
+  min-height: 18px;
+  width: 18px;
+}
+
+.secondary-action {
+  background: white;
+  border: 1px solid var(--line);
+  box-shadow: none;
+  color: var(--brand);
+}
+
+.setup-list {
+  border-top: 1px solid var(--line);
+  padding: 14px 0;
+}
+
+.setup-list:first-of-type {
+  border-top: 0;
+}
+
+.setup-list h3 {
+  margin-bottom: 10px;
+}
+
+.setup-row {
+  grid-template-columns: 1fr auto;
+  margin-bottom: 8px;
+}
+
+.muted-line {
+  color: var(--muted);
+  margin-bottom: 0;
+}
+
 @media (max-width: 920px) {
   .app-shell,
   .auth-page {
@@ -512,6 +604,12 @@ p {
   .staff-task {
     grid-template-columns: 1fr;
   }
+
+  .inline-form,
+  .handover-form,
+  .report-actions {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 560px) {
@@ -536,5 +634,9 @@ p {
   .user-area {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .permission-grid {
+    grid-template-columns: 1fr;
   }
 }

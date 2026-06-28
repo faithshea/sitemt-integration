@@ -3,19 +3,26 @@ create type public.check_area as enum (
   'fire',
   'staffguard',
   'food',
-  'cold'
+  'cold',
+  'opening',
+  'closing',
+  'safe'
 );
 
-create type public.check_status as enum ('ok', 'warning');
+create type public.check_status as enum ('ok', 'warning', 'missed');
 create type public.cold_unit_type as enum ('fridge', 'freezer');
 create type public.check_shift as enum ('morning', 'evening');
 create type public.cleaning_frequency as enum ('daily', 'weekly', 'monthly');
-create type public.user_role as enum ('management', 'staff');
+create type public.user_role as enum ('dashboard', 'management', 'staff');
+create type public.issue_priority as enum ('low', 'medium', 'high');
+create type public.issue_status as enum ('open', 'resolved');
 
 create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text not null,
   role public.user_role not null default 'staff',
+  permissions jsonb not null default '{}',
+  active boolean not null default true,
   created_at timestamptz not null default now()
 );
 
@@ -66,6 +73,16 @@ create table public.cold_units (
   created_at timestamptz not null default now()
 );
 
+create table public.routine_tasks (
+  id uuid primary key default gen_random_uuid(),
+  area public.check_area not null check (area in ('opening', 'closing', 'safe')),
+  name text not null,
+  description text not null,
+  frequency public.cleaning_frequency not null default 'daily',
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
 create table public.check_submissions (
   id uuid primary key default gen_random_uuid(),
   area public.check_area not null,
@@ -78,10 +95,33 @@ create table public.check_submissions (
   shift public.check_shift,
   photo_path text,
   notes text,
+  missed_reason text,
   status public.check_status not null default 'ok',
   reviewed_at timestamptz,
   reviewed_by uuid references public.profiles(id) on delete set null,
   corrective_action text
+);
+
+create table public.issues (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  detail text not null,
+  priority public.issue_priority not null default 'medium',
+  status public.issue_status not null default 'open',
+  reported_by uuid references public.profiles(id) on delete set null,
+  reported_by_name text not null,
+  created_at timestamptz not null default now(),
+  resolved_at timestamptz,
+  resolution text
+);
+
+create table public.handovers (
+  id uuid primary key default gen_random_uuid(),
+  manager_id uuid references public.profiles(id) on delete set null,
+  manager_name text not null,
+  summary text not null,
+  unresolved_notes text,
+  created_at timestamptz not null default now()
 );
 
 create index check_submissions_area_item_submitted_idx
@@ -97,7 +137,10 @@ alter table public.fire_zones enable row level security;
 alter table public.staffguard_remotes enable row level security;
 alter table public.food_products enable row level security;
 alter table public.cold_units enable row level security;
+alter table public.routine_tasks enable row level security;
 alter table public.check_submissions enable row level security;
+alter table public.issues enable row level security;
+alter table public.handovers enable row level security;
 
 create policy "Everyone signed in can read active setup"
   on public.cleaning_tasks for select
@@ -124,8 +167,18 @@ create policy "Everyone signed in can read cold units"
   to authenticated
   using (active = true);
 
+create policy "Everyone signed in can read routine tasks"
+  on public.routine_tasks for select
+  to authenticated
+  using (active = true);
+
 create policy "Signed in staff can add submissions"
   on public.check_submissions for insert
+  to authenticated
+  with check (true);
+
+create policy "Signed in users can add issues"
+  on public.issues for insert
   to authenticated
   with check (true);
 
@@ -144,6 +197,50 @@ create policy "Management can update submissions"
   on public.check_submissions for update
   to authenticated
   using (
+    exists (
+      select 1 from public.profiles
+      where profiles.id = auth.uid()
+      and profiles.role = 'management'
+    )
+  );
+
+create policy "Management can read issues"
+  on public.issues for select
+  to authenticated
+  using (
+    exists (
+      select 1 from public.profiles
+      where profiles.id = auth.uid()
+      and profiles.role = 'management'
+    )
+  );
+
+create policy "Management can update issues"
+  on public.issues for update
+  to authenticated
+  using (
+    exists (
+      select 1 from public.profiles
+      where profiles.id = auth.uid()
+      and profiles.role = 'management'
+    )
+  );
+
+create policy "Management can read handovers"
+  on public.handovers for select
+  to authenticated
+  using (
+    exists (
+      select 1 from public.profiles
+      where profiles.id = auth.uid()
+      and profiles.role = 'management'
+    )
+  );
+
+create policy "Management can create handovers"
+  on public.handovers for insert
+  to authenticated
+  with check (
     exists (
       select 1 from public.profiles
       where profiles.id = auth.uid()
@@ -197,6 +294,17 @@ create policy "Management can manage food products"
 
 create policy "Management can manage cold units"
   on public.cold_units for all
+  to authenticated
+  using (
+    exists (
+      select 1 from public.profiles
+      where profiles.id = auth.uid()
+      and profiles.role = 'management'
+    )
+  );
+
+create policy "Management can manage routine tasks"
+  on public.routine_tasks for all
   to authenticated
   using (
     exists (

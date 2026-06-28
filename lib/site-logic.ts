@@ -15,7 +15,10 @@ export const areaLabels: Record<Area, string> = {
   fire: "Fire alarm",
   staffguard: "StaffGuard",
   food: "Food temperature",
-  cold: "Fridge / freezer"
+  cold: "Fridge / freezer",
+  opening: "Opening",
+  closing: "Closing",
+  safe: "Safe"
 };
 
 export function startOfWeek(date = new Date()) {
@@ -97,7 +100,7 @@ export function nextWeeklyItem<T extends FireZone | StaffGuardRemote>(
       .map((submission) => submission.itemId)
   );
 
-  return items.find((item) => !completedThisWeek.has(item.id)) ?? null;
+  return items.filter((item) => item.active).find((item) => !completedThisWeek.has(item.id)) ?? null;
 }
 
 export function coldUnitStatus(unit: ColdUnit, value: number) {
@@ -113,7 +116,7 @@ export function buildAlerts(state: SiteState) {
   const weekStart = startOfWeek();
   const monthStart = startOfMonth();
 
-  state.cleaningTasks.forEach((task) => {
+  state.cleaningTasks.filter((task) => task.active).forEach((task) => {
     const since = task.frequency === "monthly" ? monthStart : task.frequency === "weekly" ? weekStart : new Date(new Date().setHours(0, 0, 0, 0));
     if (!hasSubmissionSince(state.submissions, "cleaning", task.id, since)) {
       alerts.push({
@@ -146,7 +149,26 @@ export function buildAlerts(state: SiteState) {
     });
   }
 
-  state.coldUnits.forEach((unit) => {
+  state.routineTasks
+    .filter((task) => task.active)
+    .forEach((task) => {
+      const since =
+        task.frequency === "monthly"
+          ? monthStart
+          : task.frequency === "weekly"
+            ? weekStart
+            : new Date(new Date().setHours(0, 0, 0, 0));
+
+      if (!hasSubmissionSince(state.submissions, task.area, task.id, since)) {
+        alerts.push({
+          title: `${task.name} not completed`,
+          detail: `${areaLabels[task.area]} check is outstanding.`,
+          severity: task.area === "safe" ? "high" : "medium"
+        });
+      }
+    });
+
+  state.coldUnits.filter((unit) => unit.active).forEach((unit) => {
     (["morning", "evening"] as Shift[]).forEach((shift) => {
       if (!hasColdShiftToday(state.submissions, unit.id, shift)) {
         alerts.push({
@@ -171,6 +193,17 @@ export function buildAlerts(state: SiteState) {
       });
     });
 
+  state.issues
+    .filter((issue) => issue.status === "open")
+    .slice(0, 6)
+    .forEach((issue) => {
+      alerts.push({
+        title: issue.title,
+        detail: issue.detail,
+        severity: issue.priority
+      });
+    });
+
   return alerts;
 }
 
@@ -187,7 +220,7 @@ export function readableDate(value?: string) {
 }
 
 export function countDueCleaning(tasks: CleaningTask[], submissions: Submission[]) {
-  return tasks.filter((task) => {
+  return tasks.filter((task) => task.active).filter((task) => {
     const since =
       task.frequency === "monthly"
         ? startOfMonth()

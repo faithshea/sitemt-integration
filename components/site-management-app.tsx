@@ -17,6 +17,7 @@ import {
 } from "@/lib/site-logic";
 import type {
   Account,
+  AccountPermissions,
   AccountRole,
   Area,
   CleaningTask,
@@ -24,6 +25,8 @@ import type {
   ColdUnitType,
   FireZone,
   FoodProduct,
+  Issue,
+  RoutineTask,
   Shift,
   SiteState,
   StaffGuardRemote,
@@ -55,10 +58,8 @@ export function SiteManagementApp({ screen }: { screen: Screen }) {
     return <HomeScreen />;
   }
 
-  const requiredRole: AccountRole = screen === "staff" ? "staff" : "management";
-
   return (
-    <PinGate accounts={state.accounts} requiredRole={requiredRole}>
+    <PinGate accounts={state.accounts} screen={screen}>
       {(account, logout) => {
         if (screen === "staff") {
           return <StaffPage account={account} state={state} setState={setState} logout={logout} />;
@@ -68,7 +69,7 @@ export function SiteManagementApp({ screen }: { screen: Screen }) {
           return <SettingsPage account={account} state={state} setState={setState} logout={logout} />;
         }
 
-        return <ManagementPage account={account} state={state} logout={logout} />;
+        return <ManagementPage account={account} state={state} setState={setState} logout={logout} />;
       }}
     </PinGate>
   );
@@ -94,21 +95,19 @@ function HomeScreen() {
 
 function PinGate({
   accounts,
-  requiredRole,
+  screen,
   children
 }: {
   accounts: Account[];
-  requiredRole: AccountRole;
+  screen: Exclude<Screen, "home">;
   children: (account: Account, logout: () => void) => React.ReactNode;
 }) {
-  const eligibleAccounts = accounts.filter(
-    (account) => account.active && account.role === requiredRole
-  );
+  const eligibleAccounts = accounts.filter((account) => accountIsEligible(account, screen));
   const [accountId, setAccountId] = useState(eligibleAccounts[0]?.id ?? "");
   const [pin, setPin] = useState("");
   const [account, setAccount] = useState<Account | null>(null);
   const [error, setError] = useState("");
-  const sessionKey = `lol-site-session-${requiredRole}`;
+  const sessionKey = `lol-site-session-${screen === "staff" ? "checks" : "management"}`;
 
   useEffect(() => {
     const savedAccountId =
@@ -174,7 +173,7 @@ function PinGate({
             />
           </label>
           {error ? <p className="form-error">{error}</p> : null}
-          <button>Unlock {requiredRole === "staff" ? "staff checks" : "dashboard"}</button>
+          <button>Unlock {screen === "staff" ? "staff checks" : "dashboard"}</button>
         </form>
       </section>
     </main>
@@ -184,10 +183,12 @@ function PinGate({
 function ManagementPage({
   account,
   state,
+  setState,
   logout
 }: {
   account: Account;
   state: SiteState;
+  setState: React.Dispatch<React.SetStateAction<SiteState>>;
   logout: () => void;
 }) {
   const alerts = useMemo(() => buildAlerts(state), [state]);
@@ -197,13 +198,73 @@ function ManagementPage({
     state.submissions,
     "staffguard"
   );
-  const warningLogs = state.submissions.filter((submission) => submission.status === "warning");
+  const warningLogs = state.submissions.filter(
+    (submission) => submission.status === "warning" && !submission.reviewedAt
+  );
+  const openIssues = state.issues.filter((issue) => issue.status === "open");
+  const latestHandover = state.handovers[0];
   const stats = [
     { label: "Open alerts", value: alerts.length },
     { label: "Tasks due", value: countDueCleaning(state.cleaningTasks, state.submissions) },
-    { label: "Warnings", value: warningLogs.length },
+    { label: "Awaiting review", value: warningLogs.length },
     { label: "Logs today", value: logsToday(state.submissions) }
   ];
+
+  const reviewSubmission = (event: FormEvent<HTMLFormElement>, submissionId: string) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setState((current) => ({
+      ...current,
+      submissions: current.submissions.map((submission) =>
+        submission.id === submissionId
+          ? {
+              ...submission,
+              reviewedAt: new Date().toISOString(),
+              reviewedBy: account.name,
+              correctiveAction: String(form.get("correctiveAction"))
+            }
+          : submission
+      )
+    }));
+    event.currentTarget.reset();
+  };
+
+  const addHandover = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setState((current) => ({
+      ...current,
+      handovers: [
+        {
+          id: makeId("handover"),
+          managerName: account.name,
+          summary: String(form.get("summary")),
+          unresolvedNotes: String(form.get("unresolvedNotes")),
+          createdAt: new Date().toISOString()
+        },
+        ...current.handovers
+      ]
+    }));
+    event.currentTarget.reset();
+  };
+
+  const resolveIssue = (event: FormEvent<HTMLFormElement>, issueId: string) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setState((current) => ({
+      ...current,
+      issues: current.issues.map((issue) =>
+        issue.id === issueId
+          ? {
+              ...issue,
+              status: "resolved",
+              resolvedAt: new Date().toISOString(),
+              resolution: String(form.get("resolution"))
+            }
+          : issue
+      )
+    }));
+  };
 
   return (
     <AppFrame account={account} active="dashboard" logout={logout}>
@@ -267,6 +328,81 @@ function ManagementPage({
       <section className="due-band">
         <DueItem title="Fire alarm zone due" value={nextFireZone ? `${nextFireZone.name} - ${nextFireZone.callPoint}` : "No zones set up"} />
         <DueItem title="StaffGuard remote due" value={nextRemote ? nextRemote.name : "No remotes set up"} />
+        <DueItem title="Open issues" value={String(openIssues.length)} />
+        <DueItem title="Latest handover" value={latestHandover ? readableDate(latestHandover.createdAt) : "No handover yet"} />
+      </section>
+
+      <section className="management-layout secondary-layout">
+        <div className="live-panel">
+          <PanelTitle title="Corrective actions" detail={`${warningLogs.length} awaiting review`} />
+          {warningLogs.length === 0 ? (
+            <EmptyState title="No reviews needed" text="Temperature warnings and missed checks will appear here." />
+          ) : (
+            <div className="activity-list">
+              {warningLogs.map((submission) => (
+                <article className="review-card" key={submission.id}>
+                  <div>
+                    <strong>{submission.itemName}</strong>
+                    <p>{submission.notes ?? "Review needed"} - {submission.staffName}</p>
+                  </div>
+                  <form className="inline-form" onSubmit={(event) => reviewSubmission(event, submission.id)}>
+                    <input name="correctiveAction" placeholder="Corrective action taken" required />
+                    <button>Sign off</button>
+                  </form>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <aside className="alert-box">
+          <PanelTitle title="Issue log" detail={`${openIssues.length} open`} />
+          {openIssues.length === 0 ? (
+            <EmptyState title="No open issues" text="Staff-reported faults and hazards will appear here." />
+          ) : (
+            <div className="activity-list">
+              {openIssues.map((issue) => (
+                <article className="review-card" key={issue.id}>
+                  <div>
+                    <strong>{issue.title}</strong>
+                    <p>{issue.detail}</p>
+                  </div>
+                  <form className="inline-form" onSubmit={(event) => resolveIssue(event, issue.id)}>
+                    <input name="resolution" placeholder="Resolution notes" required />
+                    <button>Resolve</button>
+                  </form>
+                </article>
+              ))}
+            </div>
+          )}
+        </aside>
+      </section>
+
+      <section className="account-panel">
+        <PanelTitle title="Manager handover" detail={latestHandover ? `${latestHandover.managerName} - ${readableDate(latestHandover.createdAt)}` : "No handover yet"} />
+        <form className="handover-form" onSubmit={addHandover}>
+          <textarea name="summary" placeholder="Shift summary" required />
+          <textarea name="unresolvedNotes" placeholder="Unresolved checks, issues, or notes for the next manager" />
+          <button>Add handover</button>
+        </form>
+        {latestHandover ? (
+          <article className="handover-preview">
+            <strong>{latestHandover.summary}</strong>
+            <p>{latestHandover.unresolvedNotes || "No unresolved notes."}</p>
+          </article>
+        ) : null}
+      </section>
+
+      <section className="account-panel">
+        <PanelTitle title="Reports" detail="CSV export" />
+        <div className="report-actions">
+          <button type="button" onClick={() => exportSubmissions(state)}>
+            Export check logs
+          </button>
+          <button type="button" onClick={() => exportIssues(state)}>
+            Export issue log
+          </button>
+        </div>
       </section>
     </AppFrame>
   );
@@ -291,6 +427,9 @@ function StaffPage({
     state.submissions,
     "staffguard"
   );
+  const openingTasks = state.routineTasks.filter((task) => task.active && task.area === "opening");
+  const closingTasks = state.routineTasks.filter((task) => task.active && task.area === "closing");
+  const safeTasks = state.routineTasks.filter((task) => task.active && task.area === "safe");
 
   const addSubmission = (submission: Omit<Submission, "id" | "submittedAt">) => {
     setState((current) => ({
@@ -329,6 +468,57 @@ function StaffPage({
     event.currentTarget.reset();
   };
 
+  const submitRoutineTask = (task: RoutineTask) => {
+    addSubmission({
+      area: task.area,
+      itemId: task.id,
+      itemName: task.name,
+      staffName: account.name,
+      status: "ok"
+    });
+  };
+
+  const markMissed = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const selected = String(form.get("item")).split("|");
+    const area = selected[0] as Area;
+    const itemId = selected[1];
+    const itemName = selected[2];
+    addSubmission({
+      area,
+      itemId,
+      itemName,
+      staffName: account.name,
+      status: "missed",
+      missedReason: String(form.get("reason")),
+      notes: String(form.get("reason"))
+    });
+    event.currentTarget.reset();
+  };
+
+  const reportIssue = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setState((current) => ({
+      ...current,
+      issues: [
+        {
+          id: makeId("issue"),
+          title: String(form.get("title")),
+          detail: String(form.get("detail")),
+          priority: form.get("priority") as Issue["priority"],
+          status: "open",
+          reportedBy: account.name,
+          createdAt: new Date().toISOString()
+        },
+        ...current.issues
+      ]
+    }));
+    setFlash({ tone: "success", text: "Issue reported." });
+    event.currentTarget.reset();
+  };
+
   const submitCold = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -362,11 +552,12 @@ function StaffPage({
       </section>
 
       <section className="staff-grid">
+        {account.permissions.canCompleteCleaning ? (
         <TaskSection title="Cleaning" detail="Photo required">
           {state.cleaningTasks.length === 0 ? (
             <EmptyState title="No cleaning tasks set" text="Management can add tasks in settings." />
           ) : (
-            state.cleaningTasks.map((task) => {
+            state.cleaningTasks.filter((task) => task.active).map((task) => {
               const latest = latestSubmission(state.submissions, "cleaning", task.id);
               return (
                 <article className="staff-task" key={task.id}>
@@ -407,8 +598,11 @@ function StaffPage({
             })
           )}
         </TaskSection>
+        ) : null}
 
+        {account.permissions.canCompleteFire || account.permissions.canCompleteStaffGuard ? (
         <TaskSection title="Weekly safety checks" detail="One due item at a time">
+          {account.permissions.canCompleteFire ? (
           <WeeklyCheck
             label="Fire alarm zone"
             item={nextFireZone}
@@ -417,6 +611,8 @@ function StaffPage({
             staffName={account.name}
             addSubmission={addSubmission}
           />
+          ) : null}
+          {account.permissions.canCompleteStaffGuard ? (
           <WeeklyCheck
             label="StaffGuard remote"
             item={nextRemote}
@@ -425,8 +621,11 @@ function StaffPage({
             staffName={account.name}
             addSubmission={addSubmission}
           />
+          ) : null}
         </TaskSection>
+        ) : null}
 
+        {account.permissions.canCompleteFood ? (
         <TaskSection title="Food temperature" detail="Probe sold products">
           <form className="simple-form" onSubmit={submitFood}>
             <select name="product" required>
@@ -441,7 +640,9 @@ function StaffPage({
             <button disabled={state.foodProducts.length === 0}>Submit</button>
           </form>
         </TaskSection>
+        ) : null}
 
+        {account.permissions.canCompleteCold ? (
         <TaskSection title="Fridge and freezer" detail="Morning and evening">
           <form className="simple-form" onSubmit={submitCold}>
             <select name="unit" required>
@@ -458,6 +659,47 @@ function StaffPage({
             </select>
             <input name="temperature" type="number" step="0.1" placeholder="Temperature C" required />
             <button disabled={state.coldUnits.length === 0}>Submit</button>
+          </form>
+        </TaskSection>
+        ) : null}
+
+        {account.permissions.canCompleteOpening ? (
+          <RoutineTaskSection title="Opening checks" tasks={openingTasks} empty="No opening checks set." onComplete={submitRoutineTask} />
+        ) : null}
+
+        {account.permissions.canCompleteClosing ? (
+          <RoutineTaskSection title="Closing checks" tasks={closingTasks} empty="No closing checks set." onComplete={submitRoutineTask} />
+        ) : null}
+
+        {account.permissions.canCompleteSafe ? (
+          <RoutineTaskSection title="Safe checks" tasks={safeTasks} empty="No safe checks set." onComplete={submitRoutineTask} />
+        ) : null}
+
+        <TaskSection title="Missed check reason" detail="Use when something cannot be completed">
+          <form className="simple-form" onSubmit={markMissed}>
+            <select name="item" required>
+              <option value="">Choose check</option>
+              {availableMissableItems(state, account).map((item) => (
+                <option key={`${item.area}-${item.id}`} value={`${item.area}|${item.id}|${item.name}`}>
+                  {areaLabels[item.area]} - {item.name}
+                </option>
+              ))}
+            </select>
+            <textarea name="reason" placeholder="Why could this not be completed?" required />
+            <button>Record missed check</button>
+          </form>
+        </TaskSection>
+
+        <TaskSection title="Report an issue" detail="Faults, hazards, or equipment problems">
+          <form className="simple-form" onSubmit={reportIssue}>
+            <input name="title" placeholder="Issue title" required />
+            <textarea name="detail" placeholder="What happened and where?" required />
+            <select name="priority" defaultValue="medium">
+              <option value="low">Low priority</option>
+              <option value="medium">Medium priority</option>
+              <option value="high">High priority</option>
+            </select>
+            <button>Report issue</button>
           </form>
         </TaskSection>
       </section>
@@ -486,7 +728,8 @@ function SettingsPage({
       name: String(form.get("name")),
       area: String(form.get("area")),
       frequency: form.get("frequency") as CleaningTask["frequency"],
-      requiresPhoto: true
+      requiresPhoto: true,
+      active: true
     };
     setState((current) => ({ ...current, cleaningTasks: [...current.cleaningTasks, task] }));
     setFlash({ tone: "success", text: "Cleaning task added." });
@@ -500,7 +743,8 @@ function SettingsPage({
       id: makeId("fire"),
       name: String(form.get("name")),
       callPoint: String(form.get("callPoint")),
-      description: String(form.get("description"))
+      description: String(form.get("description")),
+      active: true
     };
     setState((current) => ({ ...current, fireZones: [...current.fireZones, zone] }));
     setFlash({ tone: "success", text: "Fire zone added." });
@@ -512,7 +756,8 @@ function SettingsPage({
     const form = new FormData(event.currentTarget);
     const remote: StaffGuardRemote = {
       id: makeId("remote"),
-      name: String(form.get("name"))
+      name: String(form.get("name")),
+      active: true
     };
     setState((current) => ({
       ...current,
@@ -529,7 +774,8 @@ function SettingsPage({
       id: makeId("food"),
       name: String(form.get("name")),
       minTemp: Number(form.get("minTemp")),
-      maxTemp: Number(form.get("maxTemp"))
+      maxTemp: Number(form.get("maxTemp")),
+      active: true
     };
     setState((current) => ({ ...current, foodProducts: [...current.foodProducts, product] }));
     setFlash({ tone: "success", text: "Food product added." });
@@ -544,10 +790,27 @@ function SettingsPage({
       name: String(form.get("name")),
       type: form.get("type") as ColdUnitType,
       minTemp: Number(form.get("minTemp")),
-      maxTemp: Number(form.get("maxTemp"))
+      maxTemp: Number(form.get("maxTemp")),
+      active: true
     };
     setState((current) => ({ ...current, coldUnits: [...current.coldUnits, unit] }));
     setFlash({ tone: "success", text: "Fridge/freezer added." });
+    event.currentTarget.reset();
+  };
+
+  const addRoutineTask = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const task: RoutineTask = {
+      id: makeId("routine"),
+      area: form.get("area") as RoutineTask["area"],
+      name: String(form.get("name")),
+      description: String(form.get("description")),
+      frequency: form.get("frequency") as RoutineTask["frequency"],
+      active: true
+    };
+    setState((current) => ({ ...current, routineTasks: [...current.routineTasks, task] }));
+    setFlash({ tone: "success", text: "Check task added." });
     event.currentTarget.reset();
   };
 
@@ -565,7 +828,8 @@ function SettingsPage({
           name: accountName,
           role,
           pin: String(form.get("pin") || "123456"),
-          active: true
+          active: true,
+          permissions: permissionsForRole(role)
         }
       ]
     }));
@@ -582,6 +846,47 @@ function SettingsPage({
       )
     }));
     setFlash({ tone: "success", text: `New PIN generated: ${pin}` });
+  };
+
+  const toggleAccountActive = (accountId: string) => {
+    setState((current) => ({
+      ...current,
+      accounts: current.accounts.map((item) =>
+        item.id === accountId ? { ...item, active: !item.active } : item
+      )
+    }));
+  };
+
+  const toggleAccountPermission = (
+    accountId: string,
+    permission: keyof AccountPermissions
+  ) => {
+    setState((current) => ({
+      ...current,
+      accounts: current.accounts.map((item) =>
+        item.id === accountId
+          ? {
+              ...item,
+              permissions: {
+                ...item.permissions,
+                [permission]: !item.permissions[permission]
+              }
+            }
+          : item
+      )
+    }));
+  };
+
+  const toggleSetupActive = (
+    collection: "cleaningTasks" | "fireZones" | "staffGuardRemotes" | "foodProducts" | "coldUnits" | "routineTasks",
+    itemId: string
+  ) => {
+    setState((current) => ({
+      ...current,
+      [collection]: current[collection].map((item) =>
+        item.id === itemId ? { ...item, active: !item.active } : item
+      )
+    }));
   };
 
   return (
@@ -634,9 +939,25 @@ function SettingsPage({
           </p>
         </SettingsForm>
 
+        <SettingsForm title="Opening, closing or safe check" onSubmit={addRoutineTask}>
+          <input name="name" placeholder="Check name" required />
+          <select name="area" defaultValue="opening">
+            <option value="opening">Opening</option>
+            <option value="closing">Closing</option>
+            <option value="safe">Safe</option>
+          </select>
+          <select name="frequency" defaultValue="daily">
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+          <textarea name="description" placeholder="What should staff check?" required />
+        </SettingsForm>
+
         <SettingsForm title="Staff or management account" onSubmit={addAccount}>
           <input name="name" placeholder="Full name" required />
           <select name="role" defaultValue="staff">
+            <option value="dashboard">Dashboard display</option>
             <option value="staff">Staff</option>
             <option value="management">Management</option>
           </select>
@@ -651,14 +972,41 @@ function SettingsPage({
             <article className="account-row" key={item.id}>
               <div>
                 <strong>{item.name}</strong>
-                <p>{item.role} - current PIN {item.pin}</p>
+                <p>{item.role} - current PIN {item.pin} - {item.active ? "active" : "inactive"}</p>
+                <div className="permission-grid">
+                  {permissionOptions.map((permission) => (
+                    <label key={permission.key}>
+                      <input
+                        checked={item.permissions[permission.key]}
+                        onChange={() => toggleAccountPermission(item.id, permission.key)}
+                        type="checkbox"
+                      />
+                      {permission.label}
+                    </label>
+                  ))}
+                </div>
               </div>
-              <button type="button" onClick={() => regeneratePin(item.id)}>
-                Generate PIN
-              </button>
+              <div className="row-actions">
+                <button type="button" onClick={() => regeneratePin(item.id)}>
+                  Generate PIN
+                </button>
+                <button className="secondary-action" type="button" onClick={() => toggleAccountActive(item.id)}>
+                  {item.active ? "Deactivate" : "Reactivate"}
+                </button>
+              </div>
             </article>
           ))}
         </div>
+      </section>
+
+      <section className="account-panel">
+        <PanelTitle title="Active setup items" detail="Deactivate without deleting history" />
+        <SetupList title="Cleaning" items={state.cleaningTasks} onToggle={(id) => toggleSetupActive("cleaningTasks", id)} />
+        <SetupList title="Fire zones" items={state.fireZones} onToggle={(id) => toggleSetupActive("fireZones", id)} />
+        <SetupList title="StaffGuard" items={state.staffGuardRemotes} onToggle={(id) => toggleSetupActive("staffGuardRemotes", id)} />
+        <SetupList title="Food products" items={state.foodProducts} onToggle={(id) => toggleSetupActive("foodProducts", id)} />
+        <SetupList title="Fridges / freezers" items={state.coldUnits} onToggle={(id) => toggleSetupActive("coldUnits", id)} />
+        <SetupList title="Opening / closing / safe" items={state.routineTasks} onToggle={(id) => toggleSetupActive("routineTasks", id)} />
       </section>
     </AppFrame>
   );
@@ -683,20 +1031,21 @@ function AppFrame({
           <span>LOL Bingo & Slots Southport</span>
         </Link>
         <div className="nav-links">
-          {account.role === "management" ? (
-            <>
+          {account.permissions.canAccessDashboard ? (
               <Link className={active === "dashboard" ? "active" : ""} href="/management">
                 Dashboard
               </Link>
-              <Link className={active === "settings" ? "active" : ""} href="/management/settings">
+          ) : null}
+          {account.permissions.canManageSettings ? (
+            <Link className={active === "settings" ? "active" : ""} href="/management/settings">
                 Settings
               </Link>
-            </>
-          ) : (
+          ) : null}
+          {accountIsEligible(account, "staff") ? (
             <Link className={active === "staff" ? "active" : ""} href="/staff">
               Staff checks
             </Link>
-          )}
+          ) : null}
         </div>
         <div className="user-area">
           <span className="user-chip">{account.name}</span>
@@ -798,6 +1147,68 @@ function WeeklyCheck({
   );
 }
 
+function RoutineTaskSection({
+  title,
+  tasks,
+  empty,
+  onComplete
+}: {
+  title: string;
+  tasks: RoutineTask[];
+  empty: string;
+  onComplete: (task: RoutineTask) => void;
+}) {
+  return (
+    <TaskSection title={title} detail="Simple check-off">
+      {tasks.length === 0 ? (
+        <EmptyState title={empty} text="Management can add this in settings." />
+      ) : (
+        <div className="task-list">
+          {tasks.map((task) => (
+            <article className="weekly-card" key={task.id}>
+              <div>
+                <strong>{task.name}</strong>
+                <p>{task.description}</p>
+              </div>
+              <button type="button" onClick={() => onComplete(task)}>
+                Done
+              </button>
+            </article>
+          ))}
+        </div>
+      )}
+    </TaskSection>
+  );
+}
+
+function SetupList({
+  title,
+  items,
+  onToggle
+}: {
+  title: string;
+  items: Array<{ id: string; name: string; active: boolean }>;
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <div className="setup-list">
+      <h3>{title}</h3>
+      {items.length === 0 ? (
+        <p className="muted-line">Nothing set up yet.</p>
+      ) : (
+        items.map((item) => (
+          <article className="setup-row" key={item.id}>
+            <span>{item.name}</span>
+            <button className="secondary-action" type="button" onClick={() => onToggle(item.id)}>
+              {item.active ? "Deactivate" : "Reactivate"}
+            </button>
+          </article>
+        ))
+      )}
+    </div>
+  );
+}
+
 function PanelTitle({ title, detail }: { title: string; detail: string }) {
   return (
     <div className="panel-title">
@@ -855,10 +1266,205 @@ function describeWeeklyItem(item: FireZone | StaffGuardRemote) {
   return item.name;
 }
 
+const permissionOptions: { key: keyof AccountPermissions; label: string }[] = [
+  { key: "canAccessDashboard", label: "Dashboard" },
+  { key: "canManageSettings", label: "Settings" },
+  { key: "canCompleteCleaning", label: "Cleaning" },
+  { key: "canCompleteFood", label: "Food" },
+  { key: "canCompleteCold", label: "Fridge/freezer" },
+  { key: "canCompleteFire", label: "Fire" },
+  { key: "canCompleteStaffGuard", label: "StaffGuard" },
+  { key: "canCompleteOpening", label: "Opening" },
+  { key: "canCompleteClosing", label: "Closing" },
+  { key: "canCompleteSafe", label: "Safe" }
+];
+
+function permissionsForRole(role: AccountRole): AccountPermissions {
+  if (role === "management") {
+    return {
+      canAccessDashboard: true,
+      canManageSettings: true,
+      canCompleteCleaning: true,
+      canCompleteFood: true,
+      canCompleteCold: true,
+      canCompleteFire: true,
+      canCompleteStaffGuard: true,
+      canCompleteOpening: true,
+      canCompleteClosing: true,
+      canCompleteSafe: true
+    };
+  }
+
+  if (role === "dashboard") {
+    return {
+      canAccessDashboard: true,
+      canManageSettings: false,
+      canCompleteCleaning: false,
+      canCompleteFood: false,
+      canCompleteCold: false,
+      canCompleteFire: false,
+      canCompleteStaffGuard: false,
+      canCompleteOpening: false,
+      canCompleteClosing: false,
+      canCompleteSafe: false
+    };
+  }
+
+  return {
+    canAccessDashboard: false,
+    canManageSettings: false,
+    canCompleteCleaning: true,
+    canCompleteFood: true,
+    canCompleteCold: true,
+    canCompleteFire: false,
+    canCompleteStaffGuard: false,
+    canCompleteOpening: true,
+    canCompleteClosing: true,
+    canCompleteSafe: false
+  };
+}
+
+function mergeAccounts(accounts: Account[]) {
+  const byId = new Map(accounts.map((account) => [account.id, account]));
+  initialSiteState.accounts.forEach((account) => {
+    if (!byId.has(account.id)) byId.set(account.id, account);
+  });
+
+  return Array.from(byId.values()).map((account) => ({
+    ...account,
+    permissions: account.permissions ?? permissionsForRole(account.role)
+  }));
+}
+
+function accountIsEligible(account: Account, screen: Exclude<Screen, "home">) {
+  if (!account.active) return false;
+  if (screen === "management") return account.permissions.canAccessDashboard;
+  if (screen === "settings") return account.permissions.canManageSettings;
+  return Object.entries(account.permissions).some(
+    ([key, value]) => key.startsWith("canComplete") && value
+  );
+}
+
+function availableMissableItems(state: SiteState, account: Account) {
+  const items: { area: Area; id: string; name: string }[] = [];
+
+  if (account.permissions.canCompleteCleaning) {
+    items.push(
+      ...state.cleaningTasks
+        .filter((task) => task.active)
+        .map((task) => ({ area: "cleaning" as Area, id: task.id, name: task.name }))
+    );
+  }
+
+  if (account.permissions.canCompleteFood) {
+    items.push(
+      ...state.foodProducts
+        .filter((product) => product.active)
+        .map((product) => ({ area: "food" as Area, id: product.id, name: product.name }))
+    );
+  }
+
+  if (account.permissions.canCompleteCold) {
+    items.push(
+      ...state.coldUnits
+        .filter((unit) => unit.active)
+        .map((unit) => ({ area: "cold" as Area, id: unit.id, name: unit.name }))
+    );
+  }
+
+  if (account.permissions.canCompleteFire) {
+    items.push(
+      ...state.fireZones
+        .filter((zone) => zone.active)
+        .map((zone) => ({ area: "fire" as Area, id: zone.id, name: zone.name }))
+    );
+  }
+
+  if (account.permissions.canCompleteStaffGuard) {
+    items.push(
+      ...state.staffGuardRemotes
+        .filter((remote) => remote.active)
+        .map((remote) => ({ area: "staffguard" as Area, id: remote.id, name: remote.name }))
+    );
+  }
+
+  state.routineTasks
+    .filter((task) => task.active)
+    .forEach((task) => {
+      const allowed =
+        (task.area === "opening" && account.permissions.canCompleteOpening) ||
+        (task.area === "closing" && account.permissions.canCompleteClosing) ||
+        (task.area === "safe" && account.permissions.canCompleteSafe);
+      if (allowed) items.push({ area: task.area, id: task.id, name: task.name });
+    });
+
+  return items;
+}
+
+function exportSubmissions(state: SiteState) {
+  const rows = state.submissions.map((submission) => ({
+    area: areaLabels[submission.area],
+    item: submission.itemName,
+    staff: submission.staffName,
+    submittedAt: submission.submittedAt,
+    value: submission.value ?? "",
+    status: submission.status,
+    notes: submission.notes ?? "",
+    missedReason: submission.missedReason ?? "",
+    reviewedBy: submission.reviewedBy ?? "",
+    reviewedAt: submission.reviewedAt ?? "",
+    correctiveAction: submission.correctiveAction ?? ""
+  }));
+  downloadCsv("lol-check-logs.csv", rows);
+}
+
+function exportIssues(state: SiteState) {
+  const rows = state.issues.map((issue) => ({
+    title: issue.title,
+    detail: issue.detail,
+    priority: issue.priority,
+    status: issue.status,
+    reportedBy: issue.reportedBy,
+    createdAt: issue.createdAt,
+    resolvedAt: issue.resolvedAt ?? "",
+    resolution: issue.resolution ?? ""
+  }));
+  downloadCsv("lol-issue-log.csv", rows);
+}
+
+function downloadCsv(filename: string, rows: Record<string, string | number>[]) {
+  if (rows.length === 0) {
+    rows = [{ message: "No records yet" }];
+  }
+
+  const headers = Object.keys(rows[0]);
+  const csv = [
+    headers.join(","),
+    ...rows.map((row) =>
+      headers
+        .map((header) => `"${String(row[header] ?? "").replaceAll('"', '""')}"`)
+        .join(",")
+    )
+  ].join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function normalizeSiteState(state: SiteState): SiteState {
   return {
     ...initialSiteState,
     ...state,
+    accounts: mergeAccounts(state.accounts ?? []),
+    cleaningTasks: (state.cleaningTasks ?? []).map((task) => ({
+      ...task,
+      active: task.active ?? true
+    })),
     fireZones: (state.fireZones ?? []).map((zone) => ({
       ...zone,
       callPoint:
@@ -870,11 +1476,13 @@ function normalizeSiteState(state: SiteState): SiteState {
           ? zone.description
           : "location" in zone
             ? String(zone.location)
-            : ""
+            : "",
+      active: zone.active ?? true
     })),
     staffGuardRemotes: (state.staffGuardRemotes ?? []).map((remote) => ({
       id: remote.id,
-      name: remote.name
+      name: remote.name,
+      active: remote.active ?? true
     })),
     foodProducts: (state.foodProducts ?? []).map((product) => ({
       ...product,
@@ -883,7 +1491,18 @@ function normalizeSiteState(state: SiteState): SiteState {
           ? product.maxTemp
           : "targetTemp" in product
             ? Number(product.targetTemp)
-            : product.minTemp
-    }))
+            : product.minTemp,
+      active: product.active ?? true
+    })),
+    coldUnits: (state.coldUnits ?? []).map((unit) => ({
+      ...unit,
+      active: unit.active ?? true
+    })),
+    routineTasks: (state.routineTasks ?? []).map((task) => ({
+      ...task,
+      active: task.active ?? true
+    })),
+    issues: state.issues ?? [],
+    handovers: state.handovers ?? []
   };
 }
