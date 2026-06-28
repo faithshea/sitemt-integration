@@ -144,6 +144,7 @@ export async function PUT(request: Request) {
   async function saveManagementState(nextState: SiteState) {
     await saveAccounts(nextState.accounts);
     await upsertRows("cleaning_tasks", nextState.cleaningTasks.map(cleaningTaskToRow));
+    await deleteMissingRows("cleaning_tasks", nextState.cleaningTasks.map((task) => task.id));
     await upsertRows("fire_zones", nextState.fireZones.map(fireZoneToRow));
     await upsertRows("staffguard_remotes", nextState.staffGuardRemotes.map(staffGuardRemoteToRow));
     await upsertRows("food_products", nextState.foodProducts.map(foodProductToRow));
@@ -175,6 +176,16 @@ export async function PUT(request: Request) {
     if (rows.length === 0) return;
 
     const { error } = await supabase.from(table).upsert(rows);
+
+    if (error) throw new Error(error.message);
+  }
+
+  async function deleteMissingRows(table: string, idsToKeep: string[]) {
+    const query =
+      idsToKeep.length === 0
+        ? supabase.from(table).delete().neq("id", "00000000-0000-0000-0000-000000000000")
+        : supabase.from(table).delete().not("id", "in", `(${idsToKeep.join(",")})`);
+    const { error } = await query;
 
     if (error) throw new Error(error.message);
   }

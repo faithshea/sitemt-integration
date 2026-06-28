@@ -7,6 +7,8 @@ import { initialSiteState } from "@/lib/demo-data";
 import {
   areaLabels,
   buildAlerts,
+  cleaningFrequencyLabel,
+  cleaningTaskDue,
   coldUnitStatus,
   countDueCleaning,
   foodStatus,
@@ -171,10 +173,15 @@ function PinGate({
   const authVersion = useRef(0);
   const sessionKey = `lol-site-session-${screen === "staff" ? "checks" : screen === "dashboard" ? "dashboard" : "management"}`;
   const currentAccountKey = "lol-site-current-account";
+  const currentSessionTokenKey = "lol-site-current-session-token";
 
   useEffect(() => {
     const currentAccountId = window.localStorage.getItem(currentAccountKey);
-    const savedToken = window.localStorage.getItem(`${sessionKey}-token`) ?? window.sessionStorage.getItem(`${sessionKey}-token`);
+    const savedToken =
+      window.localStorage.getItem(`${sessionKey}-token`) ??
+      window.sessionStorage.getItem(`${sessionKey}-token`) ??
+      window.localStorage.getItem(currentSessionTokenKey) ??
+      window.sessionStorage.getItem(currentSessionTokenKey);
     if (remoteEnabled && savedToken) {
       const restoreVersion = authVersion.current;
       void restoreRemoteSession(savedToken)
@@ -217,6 +224,8 @@ function PinGate({
       window.localStorage.setItem(`${sessionKey}-token`, login.sessionToken);
       window.sessionStorage.setItem(`${sessionKey}-token`, login.sessionToken);
       window.localStorage.setItem(currentAccountKey, login.account.id);
+      window.localStorage.setItem(currentSessionTokenKey, login.sessionToken);
+      window.sessionStorage.setItem(currentSessionTokenKey, login.sessionToken);
       setAccount(login.account);
       await onAuthenticated(login.sessionToken, login.account);
       return;
@@ -239,6 +248,8 @@ function PinGate({
     if (savedToken) void remoteLogout(savedToken);
     clearStoredSiteSessions();
     window.localStorage.removeItem(currentAccountKey);
+    window.localStorage.removeItem(currentSessionTokenKey);
+    window.sessionStorage.removeItem(currentSessionTokenKey);
     setPin("");
     setAccount(null);
     onLogout();
@@ -748,7 +759,7 @@ function StaffPage({
                 <article className="staff-task" key={task.id}>
                   <div>
                     <strong>{task.name}</strong>
-                    <p>{task.area} - last log: {readableDate(latest?.submittedAt)}</p>
+                    <p>{task.area} - {cleaningFrequencyLabel(task.frequency)} - last log: {readableDate(latest?.submittedAt)}</p>
                   </div>
                   <input
                     accept="image/*"
@@ -1078,6 +1089,14 @@ function SettingsPage({
     }));
   };
 
+  const removeCleaningTask = (taskId: string) => {
+    setState((current) => ({
+      ...current,
+      cleaningTasks: current.cleaningTasks.filter((task) => task.id !== taskId)
+    }));
+    setFlash({ tone: "success", text: "Cleaning task removed." });
+  };
+
   return (
     <AppFrame account={account} active="settings" logout={logout}>
       <section className="dashboard-hero">
@@ -1107,9 +1126,11 @@ function SettingsPage({
           <input name="name" placeholder="Task name" required />
           <input name="area" placeholder="Area" required />
           <select name="frequency" defaultValue="daily">
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
-            <option value="monthly">Monthly</option>
+            {cleaningFrequencyOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
         </SettingsForm>
 
@@ -1208,7 +1229,12 @@ function SettingsPage({
       {tab === "active" ? (
       <section className="account-panel">
         <PanelTitle title="Active setup items" detail="Deactivate without deleting history" />
-        <SetupList title="Cleaning" items={state.cleaningTasks} onToggle={(id) => toggleSetupActive("cleaningTasks", id)} />
+        <SetupList
+          title="Cleaning"
+          items={state.cleaningTasks}
+          onRemove={removeCleaningTask}
+          onToggle={(id) => toggleSetupActive("cleaningTasks", id)}
+        />
         <SetupList title="Fire zones" items={state.fireZones} onToggle={(id) => toggleSetupActive("fireZones", id)} />
         <SetupList title="StaffGuard" items={state.staffGuardRemotes} onToggle={(id) => toggleSetupActive("staffGuardRemotes", id)} />
         <SetupList title="Food products" items={state.foodProducts} onToggle={(id) => toggleSetupActive("foodProducts", id)} />
@@ -1406,10 +1432,12 @@ function RoutineTaskSection({
 function SetupList({
   title,
   items,
+  onRemove,
   onToggle
 }: {
   title: string;
   items: Array<{ id: string; name: string; active: boolean }>;
+  onRemove?: (id: string) => void;
   onToggle: (id: string) => void;
 }) {
   return (
@@ -1421,9 +1449,16 @@ function SetupList({
         items.map((item) => (
           <article className="setup-row" key={item.id}>
             <span>{item.name}</span>
-            <button className="secondary-action" type="button" onClick={() => onToggle(item.id)}>
-              {item.active ? "Deactivate" : "Reactivate"}
-            </button>
+            <div className="row-actions">
+              <button className="secondary-action" type="button" onClick={() => onToggle(item.id)}>
+                {item.active ? "Deactivate" : "Reactivate"}
+              </button>
+              {onRemove ? (
+                <button className="secondary-action danger-action" type="button" onClick={() => onRemove(item.id)}>
+                  Remove
+                </button>
+              ) : null}
+            </div>
           </article>
         ))
       )}
@@ -1610,6 +1645,14 @@ const settingsTabs: { key: SettingsTab; label: string }[] = [
   { key: "reports", label: "Reports" }
 ];
 
+const cleaningFrequencyOptions: { value: CleaningTask["frequency"]; label: string }[] = [
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Once per week" },
+  { value: "twice_weekly", label: "Twice per week" },
+  { value: "four_weekly", label: "4x per week" },
+  { value: "monthly", label: "Monthly" }
+];
+
 function filterSubmissions(submissions: Submission[], filter: DashboardFilter) {
   const today = new Date(new Date().setHours(0, 0, 0, 0));
   const week = startOfWeek();
@@ -1753,7 +1796,7 @@ function dueCleaningForAccount(state: SiteState, account: Account) {
   if (!account.permissions.canCompleteCleaning) return [];
   return state.cleaningTasks
     .filter((task) => task.active)
-    .filter((task) => !hasSubmissionSince(state.submissions, "cleaning", task.id, periodStart(task.frequency)));
+    .filter((task) => cleaningTaskDue(task, state.submissions).isDue);
 }
 
 function dueRoutineForAccount(
@@ -1953,13 +1996,21 @@ async function downloadWorkbook({
 }
 
 async function loadAccountOptions() {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 8000);
+
   try {
-    const response = await fetch("/api/site/accounts", { cache: "no-store" });
+    const response = await fetch("/api/site/accounts", {
+      cache: "no-store",
+      signal: controller.signal
+    });
     if (!response.ok) return null;
     const data = await response.json();
     return normalizeSiteState({ ...initialSiteState, accounts: data.accounts }).accounts as Account[];
   } catch {
     return null;
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 
@@ -2057,6 +2108,7 @@ function normalizeSiteState(state: SiteState): SiteState {
     accounts: mergeAccounts(state.accounts ?? []),
     cleaningTasks: (state.cleaningTasks ?? []).map((task) => ({
       ...task,
+      frequency: normalizeCleaningFrequency(task.frequency),
       active: task.active ?? true
     })),
     fireZones: (state.fireZones ?? []).map((zone) => ({
@@ -2099,4 +2151,18 @@ function normalizeSiteState(state: SiteState): SiteState {
     issues: state.issues ?? [],
     handovers: state.handovers ?? []
   };
+}
+
+function normalizeCleaningFrequency(value: unknown): CleaningTask["frequency"] {
+  if (
+    value === "daily" ||
+    value === "weekly" ||
+    value === "twice_weekly" ||
+    value === "four_weekly" ||
+    value === "monthly"
+  ) {
+    return value;
+  }
+
+  return "daily";
 }

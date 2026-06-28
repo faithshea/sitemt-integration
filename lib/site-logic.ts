@@ -117,11 +117,11 @@ export function buildAlerts(state: SiteState) {
   const monthStart = startOfMonth();
 
   state.cleaningTasks.filter((task) => task.active).forEach((task) => {
-    const since = task.frequency === "monthly" ? monthStart : task.frequency === "weekly" ? weekStart : new Date(new Date().setHours(0, 0, 0, 0));
-    if (!hasSubmissionSince(state.submissions, "cleaning", task.id, since)) {
+    const due = cleaningTaskDue(task, state.submissions, weekStart, monthStart);
+    if (due.isDue) {
       alerts.push({
         title: `${task.name} not completed`,
-        detail: `${task.frequency[0].toUpperCase()}${task.frequency.slice(1)} cleaning task is outstanding.`,
+        detail: `${cleaningFrequencyLabel(task.frequency)} cleaning task is outstanding. ${due.completed} of ${due.required} completed.`,
         severity: task.frequency === "daily" ? "high" : "medium"
       });
     }
@@ -220,13 +220,50 @@ export function readableDate(value?: string) {
 }
 
 export function countDueCleaning(tasks: CleaningTask[], submissions: Submission[]) {
-  return tasks.filter((task) => task.active).filter((task) => {
-    const since =
-      task.frequency === "monthly"
-        ? startOfMonth()
-        : task.frequency === "weekly"
-          ? startOfWeek()
-          : new Date(new Date().setHours(0, 0, 0, 0));
-    return !hasSubmissionSince(submissions, "cleaning", task.id, since);
-  }).length;
+  return tasks.filter((task) => task.active && cleaningTaskDue(task, submissions).isDue).length;
+}
+
+export function cleaningFrequencyLabel(frequency: CleaningTask["frequency"]) {
+  const labels: Record<CleaningTask["frequency"], string> = {
+    daily: "Daily",
+    weekly: "Once per week",
+    twice_weekly: "Twice per week",
+    four_weekly: "4x per week",
+    monthly: "Monthly"
+  };
+  return labels[frequency];
+}
+
+export function cleaningTaskDue(
+  task: CleaningTask,
+  submissions: Submission[],
+  weekStart = startOfWeek(),
+  monthStart = startOfMonth()
+) {
+  const dayStart = new Date(new Date().setHours(0, 0, 0, 0));
+  const since =
+    task.frequency === "monthly"
+      ? monthStart
+      : task.frequency === "daily"
+        ? dayStart
+        : weekStart;
+  const required = cleaningRequiredCount(task.frequency);
+  const completed = submissions.filter(
+    (submission) =>
+      submission.area === "cleaning" &&
+      submission.itemId === task.id &&
+      new Date(submission.submittedAt) >= since
+  ).length;
+
+  return {
+    completed,
+    isDue: completed < required,
+    required
+  };
+}
+
+function cleaningRequiredCount(frequency: CleaningTask["frequency"]) {
+  if (frequency === "twice_weekly") return 2;
+  if (frequency === "four_weekly") return 4;
+  return 1;
 }

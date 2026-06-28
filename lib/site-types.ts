@@ -10,6 +10,7 @@ export type Area =
 export type ColdUnitType = "fridge" | "freezer";
 export type Shift = "morning" | "evening";
 export type AccountRole = "dashboard" | "management" | "staff";
+export type CleaningFrequency = "daily" | "weekly" | "twice_weekly" | "four_weekly" | "monthly";
 
 export type AccountPermissions = {
   canAccessDashboard: boolean;
@@ -37,7 +38,7 @@ export type CleaningTask = {
   id: string;
   name: string;
   area: string;
-  frequency: "daily" | "weekly" | "monthly";
+  frequency: CleaningFrequency;
   requiresPhoto: boolean;
   active: boolean;
 };

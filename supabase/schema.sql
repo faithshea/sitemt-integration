@@ -41,7 +41,7 @@ create type public.check_area as enum (
 create type public.check_status as enum ('ok', 'warning', 'missed');
 create type public.cold_unit_type as enum ('fridge', 'freezer');
 create type public.check_shift as enum ('morning', 'evening');
-create type public.cleaning_frequency as enum ('daily', 'weekly', 'monthly');
+create type public.cleaning_frequency as enum ('daily', 'weekly', 'twice_weekly', 'four_weekly', 'monthly');
 create type public.user_role as enum ('dashboard', 'management', 'staff');
 create type public.issue_priority as enum ('low', 'medium', 'high');
 create type public.issue_status as enum ('open', 'resolved');
