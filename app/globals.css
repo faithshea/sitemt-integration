@@ -180,6 +180,13 @@ p {
   gap: 12px;
 }
 
+.back-link {
+  color: var(--brand);
+  display: inline-flex;
+  font-weight: 900;
+  margin-bottom: 14px;
+}
+
 .pin-form label {
   color: var(--muted);
   display: grid;
@@ -498,10 +505,50 @@ p {
 }
 
 .staff-grid,
+.staff-card-grid,
+.staff-actions,
 .settings-grid {
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.staff-card-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.staff-actions {
+  grid-template-columns: repeat(2, max-content);
+  margin-bottom: 14px;
+}
+
+.staff-home-card {
+  align-items: flex-start;
+  background: white;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  display: grid;
+  gap: 8px;
+  justify-content: stretch;
+  min-height: 150px;
+  padding: 18px;
+  text-align: left;
+}
+
+.staff-home-card strong {
+  color: var(--brand);
+  font-size: 2.4rem;
+  line-height: 1;
+}
+
+.staff-home-card span {
+  font-size: 1.05rem;
+}
+
+.staff-home-card small {
+  color: var(--muted);
+  font-weight: 800;
 }
 
 .task-section {
@@ -581,6 +628,7 @@ p {
   .app-nav,
   .management-layout,
   .staff-grid,
+  .staff-card-grid,
   .settings-grid,
   .due-band {
     grid-template-columns: 1fr;
@@ -607,7 +655,8 @@ p {
 
   .inline-form,
   .handover-form,
-  .report-actions {
+  .report-actions,
+  .staff-actions {
     grid-template-columns: 1fr;
   }
 }

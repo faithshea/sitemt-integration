@@ -6,7 +6,7 @@ A Vercel and Supabase-ready Next.js project for managing daily and weekly venue 
 
 - Separate PIN-protected management and staff pages.
 - Permission-based accounts, so managers can use the dashboard and complete checks while staff can be limited to specific check types.
-- Dashboard Display starter account for a view-only dashboard screen.
+- `LOLSPTDashboard` starter account for a view-only dashboard screen, PIN `654321`.
 - Starter management account: Faith Shea, PIN `123456`.
 - Starter staff account: Alyssa Stoker, PIN `123456`.
 - Management dashboard with active alerts, live activity, and key site status.
@@ -23,6 +23,7 @@ A Vercel and Supabase-ready Next.js project for managing daily and weekly venue 
 
 - `/management` - management dashboard
 - `/management/settings` - management setup
+- `/dashboard` - view-only dashboard display login
 - `/staff` - staff checks
 
 ## Account model

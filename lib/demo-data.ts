@@ -4,9 +4,9 @@ export const initialSiteState: SiteState = {
   accounts: [
     {
       id: "acct-dashboard-display",
-      name: "Dashboard Display",
+      name: "LOLSPTDashboard",
       role: "dashboard",
-      pin: "123456",
+      pin: "654321",
       active: true,
       permissions: {
         canAccessDashboard: true,

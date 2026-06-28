@@ -10,10 +10,13 @@ import {
   coldUnitStatus,
   countDueCleaning,
   foodStatus,
+  hasSubmissionSince,
   latestSubmission,
   makeId,
   nextWeeklyItem,
-  readableDate
+  readableDate,
+  startOfMonth,
+  startOfWeek
 } from "@/lib/site-logic";
 import type {
   Account,
@@ -33,7 +36,18 @@ import type {
   Submission
 } from "@/lib/site-types";
 
-type Screen = "home" | "management" | "staff" | "settings";
+type Screen = "home" | "dashboard" | "management" | "staff" | "settings";
+type StaffSection =
+  | "home"
+  | "cleaning"
+  | "weekly"
+  | "food"
+  | "cold"
+  | "opening"
+  | "closing"
+  | "safe"
+  | "missed"
+  | "issue";
 type Flash = { tone: "success" | "warning"; text: string } | null;
 
 const storageKey = "lol-site-management-state-v2";
@@ -81,11 +95,14 @@ function HomeScreen() {
       <section className="login-card">
         <BrandBlock />
         <div className="home-actions">
+          <Link className="primary-link" href="/dashboard">
+            Dashboard
+          </Link>
           <Link className="primary-link" href="/management">
-            Management dashboard
+            Management
           </Link>
           <Link className="secondary-link" href="/staff">
-            Staff checks
+            Staff
           </Link>
         </div>
       </section>
@@ -107,10 +124,15 @@ function PinGate({
   const [pin, setPin] = useState("");
   const [account, setAccount] = useState<Account | null>(null);
   const [error, setError] = useState("");
-  const sessionKey = `lol-site-session-${screen === "staff" ? "checks" : "management"}`;
+  const sessionKey = `lol-site-session-${screen === "staff" ? "checks" : screen === "dashboard" ? "dashboard" : "management"}`;
+  const currentAccountKey = "lol-site-current-account";
 
   useEffect(() => {
+    const currentAccountId = window.localStorage.getItem(currentAccountKey);
     const savedAccountId =
+      (currentAccountId && eligibleAccounts.some((item) => item.id === currentAccountId)
+        ? currentAccountId
+        : null) ??
       window.localStorage.getItem(sessionKey) ??
       window.sessionStorage.getItem(sessionKey);
     const savedAccount = eligibleAccounts.find((item) => item.id === savedAccountId);
@@ -127,12 +149,14 @@ function PinGate({
     }
     window.localStorage.setItem(sessionKey, selected.id);
     window.sessionStorage.setItem(sessionKey, selected.id);
+    window.localStorage.setItem(currentAccountKey, selected.id);
     setAccount(selected);
   };
 
   const logout = () => {
     window.localStorage.removeItem(sessionKey);
     window.sessionStorage.removeItem(sessionKey);
+    window.localStorage.removeItem(currentAccountKey);
     setPin("");
     setAccount(null);
   };
@@ -145,6 +169,9 @@ function PinGate({
     <main className="auth-page">
       <section className="login-card">
         <BrandBlock />
+        <Link className="back-link" href="/">
+          Back
+        </Link>
         <form className="pin-form" onSubmit={submitPin}>
           <label>
             Account
@@ -173,7 +200,7 @@ function PinGate({
             />
           </label>
           {error ? <p className="form-error">{error}</p> : null}
-          <button>Unlock {screen === "staff" ? "staff checks" : "dashboard"}</button>
+          <button>Unlock {screen === "staff" ? "staff checks" : screen === "dashboard" ? "dashboard display" : "dashboard"}</button>
         </form>
       </section>
     </main>
@@ -421,15 +448,18 @@ function StaffPage({
 }) {
   const [cleaningPhoto, setCleaningPhoto] = useState<Record<string, string>>({});
   const [flash, setFlash] = useState<Flash>(null);
+  const [section, setSection] = useState<StaffSection>("home");
   const nextFireZone = nextWeeklyItem(state.fireZones, state.submissions, "fire");
   const nextRemote = nextWeeklyItem(
     state.staffGuardRemotes,
     state.submissions,
     "staffguard"
   );
-  const openingTasks = state.routineTasks.filter((task) => task.active && task.area === "opening");
-  const closingTasks = state.routineTasks.filter((task) => task.active && task.area === "closing");
-  const safeTasks = state.routineTasks.filter((task) => task.active && task.area === "safe");
+  const dueCleaningTasks = dueCleaningForAccount(state, account);
+  const dueColdEntries = dueColdForAccount(state, account);
+  const openingTasks = dueRoutineForAccount(state, account, "opening");
+  const closingTasks = dueRoutineForAccount(state, account, "closing");
+  const safeTasks = dueRoutineForAccount(state, account, "safe");
 
   const addSubmission = (submission: Omit<Submission, "id" | "submittedAt">) => {
     setState((current) => ({
@@ -547,17 +577,48 @@ function StaffPage({
     <AppFrame account={account} active="staff" logout={logout}>
       <section className="staff-hero">
         <p className="eyebrow">Staff checks</p>
-        <h1>What needs doing?</h1>
+        <h1>{section === "home" ? "What needs doing?" : staffSectionTitle(section)}</h1>
         {flash ? <p className={`flash ${flash.tone}`}>{flash.text}</p> : null}
       </section>
 
-      <section className="staff-grid">
-        {account.permissions.canCompleteCleaning ? (
+      {section === "home" ? (
+        <section className="staff-card-grid">
+          {staffCards({
+            account,
+            state,
+            dueCleaningTasks,
+            dueColdEntries,
+            nextFireZone,
+            nextRemote,
+            openingTasks,
+            closingTasks,
+            safeTasks
+          }).map((card) => (
+            <button className="staff-home-card" key={card.section} type="button" onClick={() => setSection(card.section)}>
+              <span>{card.title}</span>
+              <strong>{card.count}</strong>
+              <small>{card.detail}</small>
+            </button>
+          ))}
+        </section>
+      ) : (
+        <>
+          <section className="staff-actions">
+            <button className="secondary-action" type="button" onClick={() => setSection("home")}>
+              Back
+            </button>
+            <button className="secondary-action" type="button" onClick={() => setSection("home")}>
+              Home
+            </button>
+          </section>
+
+          <section className="staff-grid">
+        {section === "cleaning" && account.permissions.canCompleteCleaning ? (
         <TaskSection title="Cleaning" detail="Photo required">
-          {state.cleaningTasks.length === 0 ? (
-            <EmptyState title="No cleaning tasks set" text="Management can add tasks in settings." />
+          {dueCleaningTasks.length === 0 ? (
+            <EmptyState title="No cleaning due" text="Completed weekly and monthly checks will return when they are due again." />
           ) : (
-            state.cleaningTasks.filter((task) => task.active).map((task) => {
+            dueCleaningTasks.map((task) => {
               const latest = latestSubmission(state.submissions, "cleaning", task.id);
               return (
                 <article className="staff-task" key={task.id}>
@@ -600,7 +661,7 @@ function StaffPage({
         </TaskSection>
         ) : null}
 
-        {account.permissions.canCompleteFire || account.permissions.canCompleteStaffGuard ? (
+        {section === "weekly" && (account.permissions.canCompleteFire || account.permissions.canCompleteStaffGuard) ? (
         <TaskSection title="Weekly safety checks" detail="One due item at a time">
           {account.permissions.canCompleteFire ? (
           <WeeklyCheck
@@ -625,7 +686,7 @@ function StaffPage({
         </TaskSection>
         ) : null}
 
-        {account.permissions.canCompleteFood ? (
+        {section === "food" && account.permissions.canCompleteFood ? (
         <TaskSection title="Food temperature" detail="Probe sold products">
           <form className="simple-form" onSubmit={submitFood}>
             <select name="product" required>
@@ -642,39 +703,43 @@ function StaffPage({
         </TaskSection>
         ) : null}
 
-        {account.permissions.canCompleteCold ? (
+        {section === "cold" && account.permissions.canCompleteCold ? (
         <TaskSection title="Fridge and freezer" detail="Morning and evening">
           <form className="simple-form" onSubmit={submitCold}>
             <select name="unit" required>
               <option value="">Choose fridge/freezer</option>
-              {state.coldUnits.map((unit) => (
+              {uniqueDueColdUnits(dueColdEntries).map((unit) => (
                 <option key={unit.id} value={unit.id}>
                   {unit.name} - {unit.type}
                 </option>
               ))}
             </select>
             <select name="shift" defaultValue="morning">
-              <option value="morning">Morning</option>
-              <option value="evening">Evening</option>
+              {dueColdEntries.some((entry) => entry.shift === "morning") ? <option value="morning">Morning</option> : null}
+              {dueColdEntries.some((entry) => entry.shift === "evening") ? <option value="evening">Evening</option> : null}
             </select>
             <input name="temperature" type="number" step="0.1" placeholder="Temperature C" required />
-            <button disabled={state.coldUnits.length === 0}>Submit</button>
+            <button disabled={dueColdEntries.length === 0}>Submit</button>
           </form>
+          {dueColdEntries.length === 0 ? (
+            <EmptyState title="Cold checks complete" text="Morning and evening checks will return when due." />
+          ) : null}
         </TaskSection>
         ) : null}
 
-        {account.permissions.canCompleteOpening ? (
+        {section === "opening" && account.permissions.canCompleteOpening ? (
           <RoutineTaskSection title="Opening checks" tasks={openingTasks} empty="No opening checks set." onComplete={submitRoutineTask} />
         ) : null}
 
-        {account.permissions.canCompleteClosing ? (
+        {section === "closing" && account.permissions.canCompleteClosing ? (
           <RoutineTaskSection title="Closing checks" tasks={closingTasks} empty="No closing checks set." onComplete={submitRoutineTask} />
         ) : null}
 
-        {account.permissions.canCompleteSafe ? (
+        {section === "safe" && account.permissions.canCompleteSafe ? (
           <RoutineTaskSection title="Safe checks" tasks={safeTasks} empty="No safe checks set." onComplete={submitRoutineTask} />
         ) : null}
 
+        {section === "missed" ? (
         <TaskSection title="Missed check reason" detail="Use when something cannot be completed">
           <form className="simple-form" onSubmit={markMissed}>
             <select name="item" required>
@@ -689,7 +754,9 @@ function StaffPage({
             <button>Record missed check</button>
           </form>
         </TaskSection>
+        ) : null}
 
+        {section === "issue" ? (
         <TaskSection title="Report an issue" detail="Faults, hazards, or equipment problems">
           <form className="simple-form" onSubmit={reportIssue}>
             <input name="title" placeholder="Issue title" required />
@@ -702,7 +769,10 @@ function StaffPage({
             <button>Report issue</button>
           </form>
         </TaskSection>
-      </section>
+        ) : null}
+          </section>
+        </>
+      )}
     </AppFrame>
   );
 }
@@ -1209,6 +1279,100 @@ function SetupList({
   );
 }
 
+function staffSectionTitle(section: StaffSection) {
+  const titles: Record<StaffSection, string> = {
+    home: "What needs doing?",
+    cleaning: "Cleaning",
+    weekly: "Weekly safety checks",
+    food: "Food temperature",
+    cold: "Fridge and freezer",
+    opening: "Opening checks",
+    closing: "Closing checks",
+    safe: "Safe checks",
+    missed: "Missed check reason",
+    issue: "Report an issue"
+  };
+  return titles[section];
+}
+
+function staffCards({
+  account,
+  state,
+  dueCleaningTasks,
+  dueColdEntries,
+  nextFireZone,
+  nextRemote,
+  openingTasks,
+  closingTasks,
+  safeTasks
+}: {
+  account: Account;
+  state: SiteState;
+  dueCleaningTasks: CleaningTask[];
+  dueColdEntries: { unit: ColdUnit; shift: Shift }[];
+  nextFireZone: FireZone | null;
+  nextRemote: StaffGuardRemote | null;
+  openingTasks: RoutineTask[];
+  closingTasks: RoutineTask[];
+  safeTasks: RoutineTask[];
+}) {
+  const cards: { section: StaffSection; title: string; count: string | number; detail: string }[] = [];
+
+  if (account.permissions.canCompleteCleaning) {
+    cards.push({
+      section: "cleaning",
+      title: "Cleaning",
+      count: dueCleaningTasks.length,
+      detail: "Photo evidence tasks"
+    });
+  }
+
+  if (account.permissions.canCompleteFire || account.permissions.canCompleteStaffGuard) {
+    const weeklyCount = Number(Boolean(nextFireZone && account.permissions.canCompleteFire)) + Number(Boolean(nextRemote && account.permissions.canCompleteStaffGuard));
+    cards.push({
+      section: "weekly",
+      title: "Weekly safety",
+      count: weeklyCount,
+      detail: "Fire alarm and StaffGuard"
+    });
+  }
+
+  if (account.permissions.canCompleteFood) {
+    cards.push({
+      section: "food",
+      title: "Food temperatures",
+      count: state.foodProducts.filter((product) => product.active).length,
+      detail: "Probe sold products"
+    });
+  }
+
+  if (account.permissions.canCompleteCold) {
+    cards.push({
+      section: "cold",
+      title: "Fridge / freezer",
+      count: dueColdEntries.length,
+      detail: "Morning and evening"
+    });
+  }
+
+  if (account.permissions.canCompleteOpening) {
+    cards.push({ section: "opening", title: "Opening", count: openingTasks.length, detail: "Due opening checks" });
+  }
+
+  if (account.permissions.canCompleteClosing) {
+    cards.push({ section: "closing", title: "Closing", count: closingTasks.length, detail: "Due closing checks" });
+  }
+
+  if (account.permissions.canCompleteSafe) {
+    cards.push({ section: "safe", title: "Safe", count: safeTasks.length, detail: "Restricted checks" });
+  }
+
+  cards.push({ section: "missed", title: "Missed check", count: "!", detail: "Record why not completed" });
+  cards.push({ section: "issue", title: "Report issue", count: "+", detail: "Faults or hazards" });
+
+  return cards;
+}
+
 function PanelTitle({ title, detail }: { title: string; detail: string }) {
   return (
     <div className="panel-title">
@@ -1332,12 +1496,15 @@ function mergeAccounts(accounts: Account[]) {
 
   return Array.from(byId.values()).map((account) => ({
     ...account,
+    name: account.id === "acct-dashboard-display" ? "LOLSPTDashboard" : account.name,
+    pin: account.id === "acct-dashboard-display" && account.pin === "123456" ? "654321" : account.pin,
     permissions: account.permissions ?? permissionsForRole(account.role)
   }));
 }
 
 function accountIsEligible(account: Account, screen: Exclude<Screen, "home">) {
   if (!account.active) return false;
+  if (screen === "dashboard") return account.role === "dashboard" && account.permissions.canAccessDashboard;
   if (screen === "management") return account.permissions.canAccessDashboard;
   if (screen === "settings") return account.permissions.canManageSettings;
   return Object.entries(account.permissions).some(
@@ -1399,6 +1566,61 @@ function availableMissableItems(state: SiteState, account: Account) {
     });
 
   return items;
+}
+
+function dueCleaningForAccount(state: SiteState, account: Account) {
+  if (!account.permissions.canCompleteCleaning) return [];
+  return state.cleaningTasks
+    .filter((task) => task.active)
+    .filter((task) => !hasSubmissionSince(state.submissions, "cleaning", task.id, periodStart(task.frequency)));
+}
+
+function dueRoutineForAccount(
+  state: SiteState,
+  account: Account,
+  area: RoutineTask["area"]
+) {
+  const permissionMap = {
+    opening: account.permissions.canCompleteOpening,
+    closing: account.permissions.canCompleteClosing,
+    safe: account.permissions.canCompleteSafe
+  };
+
+  if (!permissionMap[area]) return [];
+
+  return state.routineTasks
+    .filter((task) => task.active && task.area === area)
+    .filter((task) => !hasSubmissionSince(state.submissions, task.area, task.id, periodStart(task.frequency)));
+}
+
+function dueColdForAccount(state: SiteState, account: Account) {
+  if (!account.permissions.canCompleteCold) return [];
+  return state.coldUnits
+    .filter((unit) => unit.active)
+    .flatMap((unit) =>
+      (["morning", "evening"] as Shift[])
+        .filter(
+          (shift) =>
+            !state.submissions.some(
+              (submission) =>
+                submission.area === "cold" &&
+                submission.itemId === unit.id &&
+                submission.shift === shift &&
+                new Date(submission.submittedAt) >= periodStart("daily")
+            )
+        )
+        .map((shift) => ({ unit, shift }))
+    );
+}
+
+function uniqueDueColdUnits(entries: { unit: ColdUnit; shift: Shift }[]) {
+  return Array.from(new Map(entries.map((entry) => [entry.unit.id, entry.unit])).values());
+}
+
+function periodStart(frequency: "daily" | "weekly" | "monthly") {
+  if (frequency === "weekly") return startOfWeek();
+  if (frequency === "monthly") return startOfMonth();
+  return new Date(new Date().setHours(0, 0, 0, 0));
 }
 
 function exportSubmissions(state: SiteState) {
