@@ -296,7 +296,7 @@ begin
   plain_token := encode(gen_random_bytes(32), 'hex');
 
   insert into public.site_sessions (account_id, token_hash, expires_at)
-  values (matched_account.id, encode(digest(plain_token, 'sha256'), 'hex'), session_expiry);
+  values (matched_account.id, encode(digest(plain_token::bytea, 'sha256'::text), 'hex'), session_expiry);
 
   return query
   select
@@ -317,7 +317,7 @@ set search_path = public
 as $$
   update public.site_sessions
   set revoked_at = now()
-  where token_hash = encode(digest(p_session_token, 'sha256'), 'hex')
+  where token_hash = encode(digest(p_session_token::bytea, 'sha256'::text), 'hex')
   and revoked_at is null;
 $$;
 
@@ -335,7 +335,7 @@ as $$
   select account.id, account.display_name, account.role, account.permissions
   from public.site_sessions session
   join public.site_accounts account on account.id = session.account_id
-  where session.token_hash = encode(digest(p_session_token, 'sha256'), 'hex')
+  where session.token_hash = encode(digest(p_session_token::bytea, 'sha256'::text), 'hex')
   and session.revoked_at is null
   and session.expires_at > now()
   and account.active = true;
