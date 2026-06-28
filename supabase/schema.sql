@@ -35,7 +35,8 @@ create type public.check_area as enum (
   'cold',
   'opening',
   'closing',
-  'safe'
+  'safe',
+  'management'
 );
 
 create type public.check_status as enum ('ok', 'warning', 'missed');
@@ -120,7 +121,7 @@ create table public.cold_units (
 
 create table public.routine_tasks (
   id uuid primary key default gen_random_uuid(),
-  area public.check_area not null check (area in ('opening', 'closing', 'safe')),
+  area public.check_area not null check (area::text in ('opening', 'closing', 'safe', 'management')),
   name text not null,
   description text not null,
   frequency public.cleaning_frequency not null default 'daily',

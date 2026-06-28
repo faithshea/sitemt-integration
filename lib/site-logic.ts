@@ -18,7 +18,8 @@ export const areaLabels: Record<Area, string> = {
   cold: "Fridge / freezer",
   opening: "Opening",
   closing: "Closing",
-  safe: "Safe"
+  safe: "Safe",
+  management: "Management"
 };
 
 export function startOfWeek(date = new Date()) {

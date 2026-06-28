@@ -143,52 +143,66 @@ export async function PUT(request: Request) {
     return NextResponse.json({ ok: true });
 
     async function saveManagementState(nextState: SiteState) {
-    await saveAccounts(nextState.accounts);
-    await upsertRows("cleaning_tasks", nextState.cleaningTasks.map(cleaningTaskToRow));
-    await deleteMissingRows("cleaning_tasks", nextState.cleaningTasks.map((task) => task.id));
-    await upsertRows("fire_zones", nextState.fireZones.map(fireZoneToRow));
-    await upsertRows("staffguard_remotes", nextState.staffGuardRemotes.map(staffGuardRemoteToRow));
-    await upsertRows("food_products", nextState.foodProducts.map(foodProductToRow));
-    await upsertRows("cold_units", nextState.coldUnits.map(coldUnitToRow));
-    await upsertRows("routine_tasks", nextState.routineTasks.map(routineTaskToRow));
-  }
+      await saveAccounts(nextState.accounts);
+      await upsertRows("cleaning_tasks", nextState.cleaningTasks.map(cleaningTaskToRow));
+      await deleteMissingRows("cleaning_tasks", nextState.cleaningTasks.map((task) => task.id));
+      await upsertRows("fire_zones", nextState.fireZones.map(fireZoneToRow));
+      await upsertRows("staffguard_remotes", nextState.staffGuardRemotes.map(staffGuardRemoteToRow));
+      await upsertRows("food_products", nextState.foodProducts.map(foodProductToRow));
+      await upsertRows("cold_units", nextState.coldUnits.map(coldUnitToRow));
+      await upsertRows("routine_tasks", nextState.routineTasks.map(routineTaskToRow));
+    }
 
     async function saveAccounts(nextAccounts: Account[]) {
-    for (const item of nextAccounts) {
-      const row = item.pin
-        ? { ...accountToRow(item), pin_hash: "pending-pin-reset" }
-        : accountToRow(item);
-      const { error } = await supabase.from("site_accounts").upsert(row);
-      if (error) throw new Error(error.message);
+      for (const item of nextAccounts) {
+        const row = accountToRow(item);
+        const { data: existing, error: existingError } = await supabase
+          .from("site_accounts")
+          .select("id")
+          .eq("id", item.id)
+          .maybeSingle();
 
-      if (item.pin) {
-        const { error: pinError } = await supabase.rpc("management_reset_account_pin", {
-          p_manager_session_token: request.headers.get("x-site-session") ?? "",
-          p_account_id: item.id,
-          p_new_pin: item.pin
-        });
+        if (existingError) throw new Error(existingError.message);
 
-        if (pinError) throw new Error(pinError.message);
+        if (existing) {
+          const { error } = await supabase.from("site_accounts").update(row).eq("id", item.id);
+          if (error) throw new Error(error.message);
+        } else {
+          const { error } = await supabase.from("site_accounts").insert({
+            ...row,
+            pin_hash: "pending-pin-reset"
+          });
+          if (error) throw new Error(error.message);
+        }
+
+        if (item.pin) {
+          const { error: pinError } = await supabase.rpc("management_reset_account_pin", {
+            p_manager_session_token: request.headers.get("x-site-session") ?? "",
+            p_account_id: item.id,
+            p_new_pin: item.pin
+          });
+
+          if (pinError) throw new Error(pinError.message);
+        }
       }
     }
-  }
 
     async function upsertRows(table: string, rows: Record<string, unknown>[]) {
-    if (rows.length === 0) return;
+      if (rows.length === 0) return;
 
-    const { error } = await supabase.from(table).upsert(rows);
+      const { error } = await supabase.from(table).upsert(rows);
 
-    if (error) throw new Error(error.message);
-  }
+      if (error) throw new Error(error.message);
+    }
 
     async function deleteMissingRows(table: string, idsToKeep: string[]) {
-    const query =
-      idsToKeep.length === 0
-        ? supabase.from(table).delete().neq("id", "00000000-0000-0000-0000-000000000000")
-        : supabase.from(table).delete().not("id", "in", `(${idsToKeep.join(",")})`);
-    const { error } = await query;
+      const query =
+        idsToKeep.length === 0
+          ? supabase.from(table).delete().neq("id", "00000000-0000-0000-0000-000000000000")
+          : supabase.from(table).delete().not("id", "in", `(${idsToKeep.join(",")})`);
+      const { error } = await query;
 
-    if (error) throw new Error(error.message);
+      if (error) throw new Error(error.message);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not save to Supabase.";

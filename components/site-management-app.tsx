@@ -38,7 +38,7 @@ import type {
   Submission
 } from "@/lib/site-types";
 
-type Screen = "home" | "dashboard" | "management" | "staff" | "settings";
+type Screen = "home" | "dashboard" | "management" | "staff" | "settings" | "manager-checks";
 type StaffSection =
   | "home"
   | "cleaning"
@@ -48,6 +48,7 @@ type StaffSection =
   | "opening"
   | "closing"
   | "safe"
+  | "management"
   | "missed"
   | "issue";
 type Flash = { tone: "success" | "warning"; text: string } | null;
@@ -115,8 +116,17 @@ export function SiteManagementApp({ screen }: { screen: Screen }) {
       screen={screen}
     >
       {(account, logout) => {
-        if (screen === "staff") {
-          return <StaffPage account={account} state={state} setState={updateState} logout={logout} sessionToken={sessionToken} />;
+        if (screen === "staff" || screen === "manager-checks") {
+          return (
+            <StaffPage
+              account={account}
+              isManagerChecks={screen === "manager-checks"}
+              state={state}
+              setState={updateState}
+              logout={logout}
+              sessionToken={sessionToken}
+            />
+          );
         }
 
         if (screen === "settings") {
@@ -170,6 +180,7 @@ function PinGate({
   const [pin, setPin] = useState("");
   const [account, setAccount] = useState<Account | null>(null);
   const [error, setError] = useState("");
+  const [restoring, setRestoring] = useState(false);
   const authVersion = useRef(0);
   const sessionKey = `lol-site-session-${screen === "staff" ? "checks" : screen === "dashboard" ? "dashboard" : "management"}`;
   const currentAccountKey = "lol-site-current-account";
@@ -184,6 +195,7 @@ function PinGate({
       window.sessionStorage.getItem(currentSessionTokenKey);
     if (remoteEnabled && savedToken) {
       const restoreVersion = authVersion.current;
+      setRestoring(true);
       void restoreRemoteSession(savedToken)
         .then((savedAccount) => {
           if (restoreVersion === authVersion.current && savedAccount && accountIsEligible(savedAccount, screen)) {
@@ -194,6 +206,9 @@ function PinGate({
         .catch(() => {
           window.localStorage.removeItem(`${sessionKey}-token`);
           window.sessionStorage.removeItem(`${sessionKey}-token`);
+        })
+        .finally(() => {
+          if (restoreVersion === authVersion.current) setRestoring(false);
         });
       return;
     }
@@ -259,6 +274,8 @@ function PinGate({
     return <>{children(account, logout)}</>;
   }
 
+  if (restoring) return <LoadingShell detail="Opening your checks..." />;
+
   return (
     <main className="auth-page">
       <section className="login-card">
@@ -288,13 +305,13 @@ function PinGate({
               maxLength={6}
               minLength={6}
               onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
-              placeholder="123456"
+              placeholder="Enter PIN"
               type="password"
               value={pin}
             />
           </label>
           {error ? <p className="form-error">{error}</p> : null}
-          <button>Unlock {screen === "staff" ? "staff checks" : screen === "dashboard" ? "dashboard display" : "dashboard"}</button>
+          <button>Unlock {screen === "staff" ? "staff checks" : screen === "dashboard" ? "dashboard display" : screen === "manager-checks" ? "manager checks" : "dashboard"}</button>
         </form>
       </section>
     </main>
@@ -545,12 +562,14 @@ function ManagementPage({
 
 function StaffPage({
   account,
+  isManagerChecks = false,
   state,
   setState,
   logout,
   sessionToken
 }: {
   account: Account;
+  isManagerChecks?: boolean;
   state: SiteState;
   setState: StateSetter;
   logout: () => void;
@@ -570,12 +589,14 @@ function StaffPage({
   const openingTasks = dueRoutineForAccount(state, account, "opening");
   const closingTasks = dueRoutineForAccount(state, account, "closing");
   const safeTasks = dueRoutineForAccount(state, account, "safe");
+  const managementTasks = dueRoutineForAccount(state, account, "management");
   const todayCount =
     dueCleaningTasks.length +
     dueColdEntries.length +
     openingTasks.length +
     closingTasks.length +
     safeTasks.length +
+    managementTasks.length +
     Number(Boolean(nextFireZone && account.permissions.canCompleteFire)) +
     Number(Boolean(nextRemote && account.permissions.canCompleteStaffGuard));
 
@@ -708,9 +729,9 @@ function StaffPage({
   };
 
   return (
-    <AppFrame account={account} active="staff" logout={logout}>
+    <AppFrame account={account} active={isManagerChecks ? "checks" : "staff"} logout={logout}>
       <section className="staff-hero">
-        <p className="eyebrow">Staff checks</p>
+        <p className="eyebrow">{isManagerChecks ? "Manager checks" : "Staff checks"}</p>
         <h1>{section === "home" ? "Today" : staffSectionTitle(section)}</h1>
         {section === "home" ? <p className="hero-note">{todayCount} due now</p> : null}
         {flash ? <p className={`flash ${flash.tone}`}>{flash.text}</p> : null}
@@ -727,6 +748,8 @@ function StaffPage({
             nextRemote,
             openingTasks,
             closingTasks,
+            isManagerChecks,
+            managementTasks,
             safeTasks
           }).map((card) => (
             <button className="staff-home-card" key={card.section} type="button" onClick={() => setSection(card.section)}>
@@ -866,6 +889,10 @@ function StaffPage({
 
         {section === "safe" && account.permissions.canCompleteSafe ? (
           <RoutineTaskSection title="Safe checks" tasks={safeTasks} empty="No safe checks set." onComplete={submitRoutineTask} />
+        ) : null}
+
+        {section === "management" && isManagerChecks ? (
+          <RoutineTaskSection title="Management checks" tasks={managementTasks} empty="No management checks set." onComplete={submitRoutineTask} />
         ) : null}
 
         {section === "missed" ? (
@@ -1163,12 +1190,13 @@ function SettingsPage({
           </p>
         </SettingsForm>
 
-        <SettingsForm title="Opening, closing or safe check" onSubmit={addRoutineTask}>
+        <SettingsForm title="Opening, closing, safe or management check" onSubmit={addRoutineTask}>
           <input name="name" placeholder="Check name" required />
           <select name="area" defaultValue="opening">
             <option value="opening">Opening</option>
             <option value="closing">Closing</option>
             <option value="safe">Safe</option>
+            <option value="management">Management</option>
           </select>
           <select name="frequency" defaultValue="daily">
             <option value="daily">Daily</option>
@@ -1185,7 +1213,7 @@ function SettingsPage({
             <option value="staff">Staff</option>
             <option value="management">Management</option>
           </select>
-          <input name="pin" inputMode="numeric" maxLength={6} placeholder="PIN, default 123456" />
+          <input name="pin" inputMode="numeric" maxLength={6} placeholder="Set 6 digit PIN" />
         </SettingsForm>
       </section>
       ) : null}
@@ -1239,7 +1267,7 @@ function SettingsPage({
         <SetupList title="StaffGuard" items={state.staffGuardRemotes} onToggle={(id) => toggleSetupActive("staffGuardRemotes", id)} />
         <SetupList title="Food products" items={state.foodProducts} onToggle={(id) => toggleSetupActive("foodProducts", id)} />
         <SetupList title="Fridges / freezers" items={state.coldUnits} onToggle={(id) => toggleSetupActive("coldUnits", id)} />
-        <SetupList title="Opening / closing / safe" items={state.routineTasks} onToggle={(id) => toggleSetupActive("routineTasks", id)} />
+        <SetupList title="Opening / closing / safe / management" items={state.routineTasks} onToggle={(id) => toggleSetupActive("routineTasks", id)} />
       </section>
       ) : null}
 
@@ -1267,7 +1295,7 @@ function AppFrame({
   children
 }: {
   account: Account;
-  active: "dashboard" | "staff" | "settings";
+  active: "dashboard" | "staff" | "settings" | "checks";
   logout: () => void;
   children: React.ReactNode;
 }) {
@@ -1289,7 +1317,11 @@ function AppFrame({
                 Settings
               </Link>
           ) : null}
-          {accountIsEligible(account, "staff") ? (
+          {account.permissions.canManageSettings ? (
+            <Link className={active === "checks" ? "active" : ""} href="/management/checks">
+              My checks
+            </Link>
+          ) : accountIsEligible(account, "staff") ? (
             <Link className={active === "staff" ? "active" : ""} href="/staff">
               Staff checks
             </Link>
@@ -1476,6 +1508,7 @@ function staffSectionTitle(section: StaffSection) {
     opening: "Opening checks",
     closing: "Closing checks",
     safe: "Safe checks",
+    management: "Management checks",
     missed: "Missed check reason",
     issue: "Report an issue"
   };
@@ -1491,6 +1524,8 @@ function staffCards({
   nextRemote,
   openingTasks,
   closingTasks,
+  isManagerChecks,
+  managementTasks,
   safeTasks
 }: {
   account: Account;
@@ -1501,6 +1536,8 @@ function staffCards({
   nextRemote: StaffGuardRemote | null;
   openingTasks: RoutineTask[];
   closingTasks: RoutineTask[];
+  isManagerChecks: boolean;
+  managementTasks: RoutineTask[];
   safeTasks: RoutineTask[];
 }) {
   const cards: { section: StaffSection; title: string; count: string | number; detail: string }[] = [];
@@ -1554,6 +1591,10 @@ function staffCards({
     cards.push({ section: "safe", title: "Safe", count: safeTasks.length, detail: "Restricted checks" });
   }
 
+  if (isManagerChecks) {
+    cards.push({ section: "management", title: "Management", count: managementTasks.length, detail: "Manager-only checklist" });
+  }
+
   cards.push({ section: "missed", title: "Missed check", count: "!", detail: "Record why not completed" });
   cards.push({ section: "issue", title: "Report issue", count: "+", detail: "Faults or hazards" });
 
@@ -1587,11 +1628,12 @@ function DueItem({ title, value }: { title: string; value: string }) {
   );
 }
 
-function LoadingShell() {
+function LoadingShell({ detail = "Loading securely..." }: { detail?: string }) {
   return (
     <main className="auth-page">
       <section className="login-card">
         <BrandBlock />
+        <p className="helper-text">{detail}</p>
       </section>
     </main>
   );
@@ -1731,6 +1773,7 @@ function accountIsEligible(account: Account, screen: Exclude<Screen, "home">) {
   if (screen === "dashboard") return account.role === "dashboard" && account.permissions.canAccessDashboard;
   if (screen === "management") return account.permissions.canAccessDashboard;
   if (screen === "settings") return account.permissions.canManageSettings;
+  if (screen === "manager-checks") return account.permissions.canManageSettings;
   return Object.entries(account.permissions).some(
     ([key, value]) => key.startsWith("canComplete") && value
   );
@@ -1807,7 +1850,8 @@ function dueRoutineForAccount(
   const permissionMap = {
     opening: account.permissions.canCompleteOpening,
     closing: account.permissions.canCompleteClosing,
-    safe: account.permissions.canCompleteSafe
+    safe: account.permissions.canCompleteSafe,
+    management: account.permissions.canManageSettings
   };
 
   if (!permissionMap[area]) return [];

@@ -6,7 +6,8 @@ export type Area =
   | "cold"
   | "opening"
   | "closing"
-  | "safe";
+  | "safe"
+  | "management";
 export type ColdUnitType = "fridge" | "freezer";
 export type Shift = "morning" | "evening";
 export type AccountRole = "dashboard" | "management" | "staff";
@@ -76,7 +77,7 @@ export type ColdUnit = {
 
 export type RoutineTask = {
   id: string;
-  area: "opening" | "closing" | "safe";
+  area: "opening" | "closing" | "safe" | "management";
   name: string;
   description: string;
   frequency: "daily" | "weekly" | "monthly";
