@@ -2,7 +2,8 @@
 -- This reset script removes the earlier email/auth profile setup and creates
 -- PIN-based site accounts for the dashboard, management, and staff areas.
 
-create extension if not exists pgcrypto;
+create schema if not exists extensions;
+create extension if not exists pgcrypto with schema extensions;
 
 drop table if exists public.handovers cascade;
 drop table if exists public.issues cascade;
@@ -252,7 +253,7 @@ returns table (
 )
 language sql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
   select site_accounts.id, site_accounts.display_name, site_accounts.role
   from public.site_accounts
@@ -275,7 +276,7 @@ returns table (
 )
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   matched_account public.site_accounts%rowtype;
@@ -287,16 +288,16 @@ begin
   from public.site_accounts
   where id = p_account_id
   and active = true
-  and pin_hash = crypt(p_pin, pin_hash);
+  and pin_hash = extensions.crypt(p_pin, pin_hash);
 
   if not found then
     raise exception 'Invalid account or PIN';
   end if;
 
-  plain_token := encode(gen_random_bytes(32), 'hex');
+  plain_token := encode(extensions.gen_random_bytes(32), 'hex');
 
   insert into public.site_sessions (account_id, token_hash, expires_at)
-  values (matched_account.id, encode(digest(plain_token::bytea, 'sha256'::text), 'hex'), session_expiry);
+  values (matched_account.id, encode(extensions.digest(plain_token, 'sha256'), 'hex'), session_expiry);
 
   return query
   select
@@ -313,11 +314,11 @@ create or replace function public.end_site_session(p_session_token text)
 returns void
 language sql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
   update public.site_sessions
   set revoked_at = now()
-  where token_hash = encode(digest(p_session_token::bytea, 'sha256'::text), 'hex')
+  where token_hash = encode(extensions.digest(p_session_token, 'sha256'), 'hex')
   and revoked_at is null;
 $$;
 
@@ -330,12 +331,12 @@ returns table (
 )
 language sql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
   select account.id, account.display_name, account.role, account.permissions
   from public.site_sessions session
   join public.site_accounts account on account.id = session.account_id
-  where session.token_hash = encode(digest(p_session_token::bytea, 'sha256'::text), 'hex')
+  where session.token_hash = encode(extensions.digest(p_session_token, 'sha256'), 'hex')
   and session.revoked_at is null
   and session.expires_at > now()
   and account.active = true;
@@ -349,7 +350,7 @@ create or replace function public.management_reset_account_pin(
 returns void
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   manager_role public.user_role;
@@ -368,7 +369,7 @@ begin
   end if;
 
   update public.site_accounts
-  set pin_hash = crypt(p_new_pin, gen_salt('bf'))
+  set pin_hash = extensions.crypt(p_new_pin, extensions.gen_salt('bf'))
   where id = p_account_id;
 end;
 $$;
@@ -385,7 +386,7 @@ values
     '00000000-0000-0000-0000-000000000001',
     'LOLSPTDashboard',
     'dashboard',
-    crypt('654321', gen_salt('bf')),
+    extensions.crypt('654321', extensions.gen_salt('bf')),
     '{
       "canAccessDashboard": true,
       "canManageSettings": false,
@@ -404,7 +405,7 @@ values
     '00000000-0000-0000-0000-000000000002',
     'Faith Shea',
     'management',
-    crypt('123456', gen_salt('bf')),
+    extensions.crypt('123456', extensions.gen_salt('bf')),
     '{
       "canAccessDashboard": true,
       "canManageSettings": true,
@@ -423,7 +424,7 @@ values
     '00000000-0000-0000-0000-000000000003',
     'Alyssa Stoker',
     'staff',
-    crypt('123456', gen_salt('bf')),
+    extensions.crypt('123456', extensions.gen_salt('bf')),
     '{
       "canAccessDashboard": false,
       "canManageSettings": false,
