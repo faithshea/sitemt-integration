@@ -1097,7 +1097,7 @@ function AppFrame({
     <main className="app-shell">
       <nav className="app-nav">
         <Link className="brand-link" href="/">
-          <Image alt="LOL Bingo logo" height={74} priority src="/lol-bingo-logo.webp" width={98} />
+          <Image alt="LOL Bingo logo" height={44} priority src="/lol-bingo-logo.webp" width={58} />
           <span>LOL Bingo & Slots Southport</span>
         </Link>
         <div className="nav-links">
@@ -1132,7 +1132,7 @@ function AppFrame({
 function BrandBlock() {
   return (
     <div className="brand-block">
-      <Image alt="LOL Bingo logo" height={122} priority src="/lol-bingo-logo.webp" width={162} />
+      <Image alt="LOL Bingo logo" height={100} priority src="/lol-bingo-logo.webp" width={132} />
       <div>
         <p className="eyebrow">LOL Bingo & Slots Southport</p>
         <h1>Site checks</h1>
