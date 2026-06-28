@@ -229,6 +229,7 @@ p {
 .staff-grid,
 .staff-card-grid,
 .staff-actions,
+.settings-tabs,
 .settings-grid,
 .account-panel {
   margin: 0 auto;
@@ -237,8 +238,10 @@ p {
 
 .app-nav {
   align-items: center;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid var(--line);
+  background:
+    linear-gradient(135deg, rgba(46, 28, 66, 0.98), rgba(109, 47, 143, 0.92) 58%, rgba(239, 63, 152, 0.78)),
+    var(--brand);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
   display: grid;
   gap: 12px;
@@ -258,7 +261,7 @@ p {
 .user-chip,
 .logout-button {
   border-radius: 8px;
-  color: var(--muted);
+  color: rgba(255, 255, 255, 0.82);
   font-size: 0.92rem;
   font-weight: 800;
   min-height: 38px;
@@ -267,7 +270,16 @@ p {
 
 .nav-links .active,
 .user-chip {
-  background: var(--soft);
+  background: rgba(255, 255, 255, 0.18);
+  color: white;
+}
+
+.brand-link {
+  color: white;
+}
+
+.logout-button {
+  background: rgba(255, 255, 255, 0.92);
   color: var(--brand);
 }
 
@@ -284,6 +296,12 @@ p {
   justify-content: space-between;
   margin-bottom: 12px;
   padding: 22px;
+}
+
+.hero-note {
+  color: rgba(255, 255, 255, 0.82);
+  font-weight: 800;
+  margin: 0;
 }
 
 .flash,
@@ -442,6 +460,26 @@ p {
 
 .report-actions {
   grid-template-columns: repeat(2, max-content);
+}
+
+.filter-bar,
+.settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.filter-active {
+  background: linear-gradient(135deg, var(--brand), var(--brand-2) 55%, var(--brand-3));
+  color: white;
+}
+
+.photo-preview {
+  color: var(--green);
+  font-size: 0.88rem;
+  font-weight: 800;
+  margin: 0;
 }
 
 .pill {
@@ -621,6 +659,12 @@ p {
   .report-actions {
     grid-template-columns: 1fr;
   }
+
+  .filter-bar,
+  .settings-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 560px) {
@@ -655,6 +699,11 @@ p {
     justify-content: center;
     min-height: 36px;
     padding: 8px 6px;
+  }
+
+  .filter-bar,
+  .settings-tabs {
+    grid-template-columns: 1fr;
   }
 
   .user-area {

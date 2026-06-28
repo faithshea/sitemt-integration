@@ -49,6 +49,8 @@ type StaffSection =
   | "missed"
   | "issue";
 type Flash = { tone: "success" | "warning"; text: string } | null;
+type DashboardFilter = "today" | "week" | "warnings" | "missed" | "unreviewed";
+type SettingsTab = "setup" | "accounts" | "active" | "reports";
 
 const storageKey = "lol-site-management-state-v2";
 
@@ -218,6 +220,7 @@ function ManagementPage({
   setState: React.Dispatch<React.SetStateAction<SiteState>>;
   logout: () => void;
 }) {
+  const [filter, setFilter] = useState<DashboardFilter>("today");
   const alerts = useMemo(() => buildAlerts(state), [state]);
   const nextFireZone = nextWeeklyItem(state.fireZones, state.submissions, "fire");
   const nextRemote = nextWeeklyItem(
@@ -236,6 +239,7 @@ function ManagementPage({
     { label: "Awaiting review", value: warningLogs.length },
     { label: "Logs today", value: logsToday(state.submissions) }
   ];
+  const filteredSubmissions = filterSubmissions(state.submissions, filter);
 
   const reviewSubmission = (event: FormEvent<HTMLFormElement>, submissionId: string) => {
     event.preventDefault();
@@ -316,12 +320,24 @@ function ManagementPage({
 
       <section className="management-layout">
         <div className="live-panel">
-          <PanelTitle title="Live activity" detail={`${state.submissions.length} total logs`} />
-          {state.submissions.length === 0 ? (
+          <PanelTitle title="Live activity" detail={`${filteredSubmissions.length} shown`} />
+          <div className="filter-bar" aria-label="Activity filters">
+            {dashboardFilters.map((item) => (
+              <button
+                className={filter === item.key ? "filter-active" : "secondary-action"}
+                key={item.key}
+                onClick={() => setFilter(item.key)}
+                type="button"
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          {filteredSubmissions.length === 0 ? (
             <EmptyState title="No activity yet" text="Staff submissions will appear here as they are completed." />
           ) : (
             <div className="activity-list">
-              {state.submissions.slice(0, 12).map((submission) => (
+              {filteredSubmissions.slice(0, 12).map((submission) => (
                 <article className="activity-item" key={submission.id}>
                   <div>
                     <span>{areaLabels[submission.area]}</span>
@@ -460,6 +476,14 @@ function StaffPage({
   const openingTasks = dueRoutineForAccount(state, account, "opening");
   const closingTasks = dueRoutineForAccount(state, account, "closing");
   const safeTasks = dueRoutineForAccount(state, account, "safe");
+  const todayCount =
+    dueCleaningTasks.length +
+    dueColdEntries.length +
+    openingTasks.length +
+    closingTasks.length +
+    safeTasks.length +
+    Number(Boolean(nextFireZone && account.permissions.canCompleteFire)) +
+    Number(Boolean(nextRemote && account.permissions.canCompleteStaffGuard));
 
   const addSubmission = (submission: Omit<Submission, "id" | "submittedAt">) => {
     setState((current) => ({
@@ -577,7 +601,8 @@ function StaffPage({
     <AppFrame account={account} active="staff" logout={logout}>
       <section className="staff-hero">
         <p className="eyebrow">Staff checks</p>
-        <h1>{section === "home" ? "What needs doing?" : staffSectionTitle(section)}</h1>
+        <h1>{section === "home" ? "Today" : staffSectionTitle(section)}</h1>
+        {section === "home" ? <p className="hero-note">{todayCount} due now</p> : null}
         {flash ? <p className={`flash ${flash.tone}`}>{flash.text}</p> : null}
       </section>
 
@@ -638,6 +663,9 @@ function StaffPage({
                       })
                     }
                   />
+                  {cleaningPhoto[task.id] ? (
+                    <p className="photo-preview">Photo attached: {cleaningPhoto[task.id]}</p>
+                  ) : null}
                   <button
                     disabled={!cleaningPhoto[task.id]}
                     onClick={() =>
@@ -789,6 +817,7 @@ function SettingsPage({
   logout: () => void;
 }) {
   const [flash, setFlash] = useState<Flash>(null);
+  const [tab, setTab] = useState<SettingsTab>("setup");
 
   const addCleaningTask = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -969,6 +998,20 @@ function SettingsPage({
         {flash ? <p className={`flash ${flash.tone}`}>{flash.text}</p> : null}
       </section>
 
+      <section className="settings-tabs" aria-label="Settings sections">
+        {settingsTabs.map((item) => (
+          <button
+            className={tab === item.key ? "filter-active" : "secondary-action"}
+            key={item.key}
+            onClick={() => setTab(item.key)}
+            type="button"
+          >
+            {item.label}
+          </button>
+        ))}
+      </section>
+
+      {tab === "setup" ? (
       <section className="settings-grid">
         <SettingsForm title="Cleaning task" onSubmit={addCleaningTask}>
           <input name="name" placeholder="Task name" required />
@@ -1034,7 +1077,9 @@ function SettingsPage({
           <input name="pin" inputMode="numeric" maxLength={6} placeholder="PIN, default 123456" />
         </SettingsForm>
       </section>
+      ) : null}
 
+      {tab === "accounts" ? (
       <section className="account-panel">
         <PanelTitle title="Accounts and PINs" detail="Management only" />
         <div className="account-list">
@@ -1068,7 +1113,9 @@ function SettingsPage({
           ))}
         </div>
       </section>
+      ) : null}
 
+      {tab === "active" ? (
       <section className="account-panel">
         <PanelTitle title="Active setup items" detail="Deactivate without deleting history" />
         <SetupList title="Cleaning" items={state.cleaningTasks} onToggle={(id) => toggleSetupActive("cleaningTasks", id)} />
@@ -1078,6 +1125,21 @@ function SettingsPage({
         <SetupList title="Fridges / freezers" items={state.coldUnits} onToggle={(id) => toggleSetupActive("coldUnits", id)} />
         <SetupList title="Opening / closing / safe" items={state.routineTasks} onToggle={(id) => toggleSetupActive("routineTasks", id)} />
       </section>
+      ) : null}
+
+      {tab === "reports" ? (
+        <section className="account-panel">
+          <PanelTitle title="Reports" detail="CSV export" />
+          <div className="report-actions">
+            <button type="button" onClick={() => exportSubmissions(state)}>
+              Export check logs
+            </button>
+            <button type="button" onClick={() => exportIssues(state)}>
+              Export issue log
+            </button>
+          </div>
+        </section>
+      ) : null}
     </AppFrame>
   );
 }
@@ -1102,7 +1164,7 @@ function AppFrame({
         </Link>
         <div className="nav-links">
           {account.permissions.canAccessDashboard ? (
-              <Link className={active === "dashboard" ? "active" : ""} href="/management">
+              <Link className={active === "dashboard" ? "active" : ""} href={account.role === "dashboard" ? "/dashboard" : "/management"}>
                 Dashboard
               </Link>
           ) : null}
@@ -1281,7 +1343,7 @@ function SetupList({
 
 function staffSectionTitle(section: StaffSection) {
   const titles: Record<StaffSection, string> = {
-    home: "What needs doing?",
+    home: "Today",
     cleaning: "Cleaning",
     weekly: "Weekly safety checks",
     food: "Food temperature",
@@ -1442,6 +1504,35 @@ const permissionOptions: { key: keyof AccountPermissions; label: string }[] = [
   { key: "canCompleteClosing", label: "Closing" },
   { key: "canCompleteSafe", label: "Safe" }
 ];
+
+const dashboardFilters: { key: DashboardFilter; label: string }[] = [
+  { key: "today", label: "Today" },
+  { key: "week", label: "This week" },
+  { key: "warnings", label: "Warnings" },
+  { key: "missed", label: "Missed" },
+  { key: "unreviewed", label: "Unreviewed" }
+];
+
+const settingsTabs: { key: SettingsTab; label: string }[] = [
+  { key: "setup", label: "Setup" },
+  { key: "accounts", label: "Accounts" },
+  { key: "active", label: "Active items" },
+  { key: "reports", label: "Reports" }
+];
+
+function filterSubmissions(submissions: Submission[], filter: DashboardFilter) {
+  const today = new Date(new Date().setHours(0, 0, 0, 0));
+  const week = startOfWeek();
+
+  return submissions.filter((submission) => {
+    const submittedAt = new Date(submission.submittedAt);
+    if (filter === "today") return submittedAt >= today;
+    if (filter === "week") return submittedAt >= week;
+    if (filter === "warnings") return submission.status === "warning";
+    if (filter === "missed") return submission.status === "missed";
+    return (submission.status === "warning" || submission.status === "missed") && !submission.reviewedAt;
+  });
+}
 
 function permissionsForRole(role: AccountRole): AccountPermissions {
   if (role === "management") {

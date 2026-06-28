@@ -3,7 +3,11 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "LOL Bingo & Slots Southport",
-  description: "Site checks for LOL Bingo & Slots Southport"
+  description: "Site checks for LOL Bingo & Slots Southport",
+  icons: {
+    icon: "/lol-bingo-logo.webp",
+    apple: "/lol-bingo-logo.webp"
+  }
 };
 
 export default function RootLayout({
