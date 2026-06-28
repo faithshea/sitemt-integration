@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { initialSiteState } from "@/lib/demo-data";
 import {
   areaLabels,
@@ -168,6 +168,7 @@ function PinGate({
   const [pin, setPin] = useState("");
   const [account, setAccount] = useState<Account | null>(null);
   const [error, setError] = useState("");
+  const authVersion = useRef(0);
   const sessionKey = `lol-site-session-${screen === "staff" ? "checks" : screen === "dashboard" ? "dashboard" : "management"}`;
   const currentAccountKey = "lol-site-current-account";
 
@@ -175,9 +176,10 @@ function PinGate({
     const currentAccountId = window.localStorage.getItem(currentAccountKey);
     const savedToken = window.localStorage.getItem(`${sessionKey}-token`) ?? window.sessionStorage.getItem(`${sessionKey}-token`);
     if (remoteEnabled && savedToken) {
+      const restoreVersion = authVersion.current;
       void restoreRemoteSession(savedToken)
         .then((savedAccount) => {
-          if (savedAccount && accountIsEligible(savedAccount, screen)) {
+          if (restoreVersion === authVersion.current && savedAccount && accountIsEligible(savedAccount, screen)) {
             setAccount(savedAccount);
             void onAuthenticated(savedToken, savedAccount);
           }
@@ -188,6 +190,8 @@ function PinGate({
         });
       return;
     }
+
+    if (remoteEnabled) return;
 
     const savedAccountId =
       (currentAccountId && eligibleAccounts.some((item) => item.id === currentAccountId)
@@ -209,6 +213,7 @@ function PinGate({
         setPin("");
         return;
       }
+      authVersion.current += 1;
       window.localStorage.setItem(`${sessionKey}-token`, login.sessionToken);
       window.sessionStorage.setItem(`${sessionKey}-token`, login.sessionToken);
       window.localStorage.setItem(currentAccountKey, login.account.id);
@@ -230,11 +235,9 @@ function PinGate({
 
   const logout = () => {
     const savedToken = window.localStorage.getItem(`${sessionKey}-token`) ?? window.sessionStorage.getItem(`${sessionKey}-token`);
+    authVersion.current += 1;
     if (savedToken) void remoteLogout(savedToken);
-    window.localStorage.removeItem(sessionKey);
-    window.sessionStorage.removeItem(sessionKey);
-    window.localStorage.removeItem(`${sessionKey}-token`);
-    window.sessionStorage.removeItem(`${sessionKey}-token`);
+    clearStoredSiteSessions();
     window.localStorage.removeItem(currentAccountKey);
     setPin("");
     setAccount(null);
@@ -1990,6 +1993,19 @@ async function remoteLogout(sessionToken: string) {
   await fetch("/api/site/session", {
     headers: { "x-site-session": sessionToken },
     method: "DELETE"
+  });
+}
+
+function clearStoredSiteSessions() {
+  [
+    "lol-site-session-dashboard",
+    "lol-site-session-management",
+    "lol-site-session-checks"
+  ].forEach((key) => {
+    window.localStorage.removeItem(key);
+    window.sessionStorage.removeItem(key);
+    window.localStorage.removeItem(`${key}-token`);
+    window.sessionStorage.removeItem(`${key}-token`);
   });
 }
 
