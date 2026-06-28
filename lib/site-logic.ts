@@ -207,8 +207,8 @@ export function buildAlerts(state: SiteState) {
   return alerts;
 }
 
-export function makeId(prefix: string) {
-  return `${prefix}-${crypto.randomUUID()}`;
+export function makeId(_prefix: string) {
+  return crypto.randomUUID();
 }
 
 export function readableDate(value?: string) {

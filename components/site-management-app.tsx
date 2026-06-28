@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { initialSiteState } from "@/lib/demo-data";
 import {
   areaLabels,
@@ -51,22 +51,52 @@ type StaffSection =
 type Flash = { tone: "success" | "warning"; text: string } | null;
 type DashboardFilter = "today" | "week" | "warnings" | "missed" | "unreviewed";
 type SettingsTab = "setup" | "accounts" | "active" | "reports";
+type StateSetter = React.Dispatch<React.SetStateAction<SiteState>>;
 
 const storageKey = "lol-site-management-state-v2";
 
 export function SiteManagementApp({ screen }: { screen: Screen }) {
   const [state, setState] = useState<SiteState>(initialSiteState);
   const [ready, setReady] = useState(false);
+  const [remoteEnabled, setRemoteEnabled] = useState(false);
+  const [sessionToken, setSessionToken] = useState("");
 
   useEffect(() => {
-    const saved = window.localStorage.getItem(storageKey);
-    if (saved) setState(normalizeSiteState(JSON.parse(saved) as SiteState));
-    setReady(true);
+    void loadAccountOptions()
+      .then((accounts) => {
+        if (accounts) {
+          setRemoteEnabled(true);
+          setState((current) => ({ ...current, accounts }));
+          return;
+        }
+
+        const saved = window.localStorage.getItem(storageKey);
+        if (saved) setState(normalizeSiteState(JSON.parse(saved) as SiteState));
+      })
+      .finally(() => setReady(true));
   }, []);
 
   useEffect(() => {
-    if (ready) window.localStorage.setItem(storageKey, JSON.stringify(state));
-  }, [ready, state]);
+    if (ready && !remoteEnabled) window.localStorage.setItem(storageKey, JSON.stringify(state));
+  }, [ready, remoteEnabled, state]);
+
+  const updateState: StateSetter = (update) => {
+    setState((current) => {
+      const next = typeof update === "function" ? update(current) : update;
+      if (remoteEnabled && sessionToken) void saveRemoteState(next, sessionToken);
+      return next;
+    });
+  };
+
+  const loadRemoteState = useCallback(async (token: string) => {
+    setSessionToken(token);
+    const remoteState = await fetchRemoteState(token);
+    if (remoteState) setState(normalizeSiteState(remoteState));
+  }, []);
+
+  const clearRemoteSession = useCallback(() => {
+    setSessionToken("");
+  }, []);
 
   if (!ready) return <LoadingShell />;
 
@@ -75,17 +105,23 @@ export function SiteManagementApp({ screen }: { screen: Screen }) {
   }
 
   return (
-    <PinGate accounts={state.accounts} screen={screen}>
+    <PinGate
+      accounts={state.accounts}
+      onAuthenticated={loadRemoteState}
+      onLogout={clearRemoteSession}
+      remoteEnabled={remoteEnabled}
+      screen={screen}
+    >
       {(account, logout) => {
         if (screen === "staff") {
-          return <StaffPage account={account} state={state} setState={setState} logout={logout} />;
+          return <StaffPage account={account} state={state} setState={updateState} logout={logout} sessionToken={sessionToken} />;
         }
 
         if (screen === "settings") {
-          return <SettingsPage account={account} state={state} setState={setState} logout={logout} />;
+          return <SettingsPage account={account} state={state} setState={updateState} logout={logout} />;
         }
 
-        return <ManagementPage account={account} state={state} setState={setState} logout={logout} />;
+        return <ManagementPage account={account} state={state} setState={updateState} logout={logout} />;
       }}
     </PinGate>
   );
@@ -114,10 +150,16 @@ function HomeScreen() {
 
 function PinGate({
   accounts,
+  onAuthenticated,
+  onLogout,
+  remoteEnabled,
   screen,
   children
 }: {
   accounts: Account[];
+  onAuthenticated: (sessionToken: string, account: Account) => void | Promise<void>;
+  onLogout: () => void;
+  remoteEnabled: boolean;
   screen: Exclude<Screen, "home">;
   children: (account: Account, logout: () => void) => React.ReactNode;
 }) {
@@ -131,6 +173,22 @@ function PinGate({
 
   useEffect(() => {
     const currentAccountId = window.localStorage.getItem(currentAccountKey);
+    const savedToken = window.localStorage.getItem(`${sessionKey}-token`) ?? window.sessionStorage.getItem(`${sessionKey}-token`);
+    if (remoteEnabled && savedToken) {
+      void restoreRemoteSession(savedToken)
+        .then((savedAccount) => {
+          if (savedAccount && accountIsEligible(savedAccount, screen)) {
+            setAccount(savedAccount);
+            void onAuthenticated(savedToken, savedAccount);
+          }
+        })
+        .catch(() => {
+          window.localStorage.removeItem(`${sessionKey}-token`);
+          window.sessionStorage.removeItem(`${sessionKey}-token`);
+        });
+      return;
+    }
+
     const savedAccountId =
       (currentAccountId && eligibleAccounts.some((item) => item.id === currentAccountId)
         ? currentAccountId
@@ -139,11 +197,26 @@ function PinGate({
       window.sessionStorage.getItem(sessionKey);
     const savedAccount = eligibleAccounts.find((item) => item.id === savedAccountId);
     if (savedAccount) setAccount(savedAccount);
-  }, [eligibleAccounts, sessionKey]);
+  }, [eligibleAccounts, onAuthenticated, remoteEnabled, screen, sessionKey]);
 
-  const submitPin = (event: FormEvent<HTMLFormElement>) => {
+  const submitPin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const selected = eligibleAccounts.find((item) => item.id === accountId);
+    if (remoteEnabled) {
+      const login = await remoteLogin(accountId, pin);
+      if (!login) {
+        setError("That PIN does not match this account.");
+        setPin("");
+        return;
+      }
+      window.localStorage.setItem(`${sessionKey}-token`, login.sessionToken);
+      window.sessionStorage.setItem(`${sessionKey}-token`, login.sessionToken);
+      window.localStorage.setItem(currentAccountKey, login.account.id);
+      setAccount(login.account);
+      await onAuthenticated(login.sessionToken, login.account);
+      return;
+    }
+
     if (!selected || selected.pin !== pin) {
       setError("That PIN does not match this account.");
       setPin("");
@@ -156,11 +229,16 @@ function PinGate({
   };
 
   const logout = () => {
+    const savedToken = window.localStorage.getItem(`${sessionKey}-token`) ?? window.sessionStorage.getItem(`${sessionKey}-token`);
+    if (savedToken) void remoteLogout(savedToken);
     window.localStorage.removeItem(sessionKey);
     window.sessionStorage.removeItem(sessionKey);
+    window.localStorage.removeItem(`${sessionKey}-token`);
+    window.sessionStorage.removeItem(`${sessionKey}-token`);
     window.localStorage.removeItem(currentAccountKey);
     setPin("");
     setAccount(null);
+    onLogout();
   };
 
   if (account) {
@@ -217,7 +295,7 @@ function ManagementPage({
 }: {
   account: Account;
   state: SiteState;
-  setState: React.Dispatch<React.SetStateAction<SiteState>>;
+  setState: StateSetter;
   logout: () => void;
 }) {
   const [filter, setFilter] = useState<DashboardFilter>("today");
@@ -455,14 +533,16 @@ function StaffPage({
   account,
   state,
   setState,
-  logout
+  logout,
+  sessionToken
 }: {
   account: Account;
   state: SiteState;
-  setState: React.Dispatch<React.SetStateAction<SiteState>>;
+  setState: StateSetter;
   logout: () => void;
+  sessionToken: string;
 }) {
-  const [cleaningPhoto, setCleaningPhoto] = useState<Record<string, string>>({});
+  const [cleaningPhoto, setCleaningPhoto] = useState<Record<string, File | null>>({});
   const [flash, setFlash] = useState<Flash>(null);
   const [section, setSection] = useState<StaffSection>("home");
   const nextFireZone = nextWeeklyItem(state.fireZones, state.submissions, "fire");
@@ -498,6 +578,22 @@ function StaffPage({
       ]
     }));
     setFlash({ tone: submission.status === "ok" ? "success" : "warning", text: "Submission saved." });
+  };
+
+  const completeCleaningTask = async (task: CleaningTask) => {
+    const photo = cleaningPhoto[task.id];
+    if (!photo) return;
+    const uploadedPath = sessionToken ? await uploadCleaningPhoto(photo, sessionToken) : null;
+
+    addSubmission({
+      area: "cleaning",
+      itemId: task.id,
+      itemName: task.name,
+      staffName: account.name,
+      photoName: uploadedPath ?? photo.name,
+      status: "ok"
+    });
+    setCleaningPhoto((current) => ({ ...current, [task.id]: null }));
   };
 
   const submitFood = (event: FormEvent<HTMLFormElement>) => {
@@ -659,25 +755,16 @@ function StaffPage({
                     onChange={(event) =>
                       setCleaningPhoto({
                         ...cleaningPhoto,
-                        [task.id]: event.target.files?.[0]?.name ?? ""
+                        [task.id]: event.target.files?.[0] ?? null
                       })
                     }
                   />
                   {cleaningPhoto[task.id] ? (
-                    <p className="photo-preview">Photo attached: {cleaningPhoto[task.id]}</p>
+                    <p className="photo-preview">Photo attached: {cleaningPhoto[task.id]?.name}</p>
                   ) : null}
                   <button
                     disabled={!cleaningPhoto[task.id]}
-                    onClick={() =>
-                      addSubmission({
-                        area: "cleaning",
-                        itemId: task.id,
-                        itemName: task.name,
-                        staffName: account.name,
-                        photoName: cleaningPhoto[task.id],
-                        status: "ok"
-                      })
-                    }
+                    onClick={() => void completeCleaningTask(task)}
                     type="button"
                   >
                     Done
@@ -813,7 +900,7 @@ function SettingsPage({
 }: {
   account: Account;
   state: SiteState;
-  setState: React.Dispatch<React.SetStateAction<SiteState>>;
+  setState: StateSetter;
   logout: () => void;
 }) {
   const [flash, setFlash] = useState<Flash>(null);
@@ -1087,7 +1174,7 @@ function SettingsPage({
             <article className="account-row" key={item.id}>
               <div>
                 <strong>{item.name}</strong>
-                <p>{item.role} - current PIN {item.pin} - {item.active ? "active" : "inactive"}</p>
+                <p>{item.role} - {item.pin ? `new PIN ${item.pin}` : "PIN protected"} - {item.active ? "active" : "inactive"}</p>
                 <div className="permission-grid">
                   {permissionOptions.map((permission) => (
                     <label key={permission.key}>
@@ -1860,6 +1947,91 @@ async function downloadWorkbook({
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+async function loadAccountOptions() {
+  try {
+    const response = await fetch("/api/site/accounts", { cache: "no-store" });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return normalizeSiteState({ ...initialSiteState, accounts: data.accounts }).accounts as Account[];
+  } catch {
+    return null;
+  }
+}
+
+async function remoteLogin(accountId: string, pin: string) {
+  try {
+    const response = await fetch("/api/site/login", {
+      body: JSON.stringify({ accountId, pin }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    });
+
+    if (!response.ok) return null;
+    return (await response.json()) as { account: Account; sessionToken: string };
+  } catch {
+    return null;
+  }
+}
+
+async function restoreRemoteSession(sessionToken: string) {
+  const response = await fetch("/api/site/session", {
+    cache: "no-store",
+    headers: { "x-site-session": sessionToken }
+  });
+
+  if (!response.ok) return null;
+  const data = await response.json();
+  return data.account as Account;
+}
+
+async function remoteLogout(sessionToken: string) {
+  await fetch("/api/site/session", {
+    headers: { "x-site-session": sessionToken },
+    method: "DELETE"
+  });
+}
+
+async function fetchRemoteState(sessionToken: string) {
+  try {
+    const response = await fetch("/api/site", {
+      cache: "no-store",
+      headers: { "x-site-session": sessionToken }
+    });
+
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.state as SiteState;
+  } catch {
+    return null;
+  }
+}
+
+async function saveRemoteState(state: SiteState, sessionToken: string) {
+  await fetch("/api/site", {
+    body: JSON.stringify({ state }),
+    headers: {
+      "Content-Type": "application/json",
+      "x-site-session": sessionToken
+    },
+    method: "PUT"
+  });
+}
+
+async function uploadCleaningPhoto(file: File, sessionToken: string) {
+  const form = new FormData();
+  form.append("file", file);
+
+  const response = await fetch("/api/site/upload", {
+    body: form,
+    headers: { "x-site-session": sessionToken },
+    method: "POST"
+  });
+
+  if (!response.ok) return null;
+  const data = await response.json();
+  return data.path as string;
 }
 
 function normalizeSiteState(state: SiteState): SiteState {
