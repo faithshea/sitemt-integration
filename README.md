@@ -60,8 +60,14 @@ Open `http://localhost:3000`, or the port shown in the terminal.
 ## Supabase setup
 
 1. Create a Supabase project.
-2. Run `supabase/schema.sql` in the Supabase SQL editor.
-3. Add your project URL and anon key to `.env.local` using `.env.example`.
-4. Create a private storage bucket for cleaning photos when the app is connected to Supabase.
+2. Run `supabase/schema.sql` in the Supabase SQL editor. This creates PIN-based site accounts instead of email-based Supabase Auth users.
+3. Add your project URL, anon key, and service-role key to `.env.local` using `.env.example`.
+4. Create a private storage bucket called `cleaning-evidence` for cleaning photos. Keep the bucket private, limit files to 5 MB, and allow `image/jpeg`, `image/png`, and `image/webp`.
+
+Starter accounts:
+
+- `LOLSPTDashboard` with PIN `654321`
+- `Faith Shea` with PIN `123456`
+- `Alyssa Stoker` with PIN `123456`
 
 The app currently uses local in-browser state so the workflows can be tested immediately. The next build step is wiring the forms and logs to Supabase.
