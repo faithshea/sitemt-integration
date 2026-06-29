@@ -342,6 +342,8 @@ function ManagementPage({
 }) {
   const [filter, setFilter] = useState<DashboardFilter>("today");
   const alerts = useMemo(() => buildAlerts(state), [state]);
+  const cleaningAlerts = alerts.filter((alert) => alert.detail.includes("cleaning task"));
+  const priorityAlerts = alerts.filter((alert) => !alert.detail.includes("cleaning task"));
   const nextFireZone = nextWeeklyItem(state.fireZones, state.submissions, "fire");
   const nextRemote = nextWeeklyItem(
     state.staffGuardRemotes,
@@ -478,7 +480,26 @@ function ManagementPage({
             <EmptyState title="All clear" text="No missed checks or anomalies are currently showing." />
           ) : (
             <div className="alert-list">
-              {alerts.slice(0, 8).map((alert, index) => (
+              {cleaningAlerts.length > 0 ? (
+                <details className="alert-summary-card">
+                  <summary>
+                    <div>
+                      <strong>Cleaning tasks due</strong>
+                      <p>{cleaningAlerts.length} outstanding</p>
+                    </div>
+                    <span>{cleaningAlerts.length}</span>
+                  </summary>
+                  <div className="alert-summary-list">
+                    {cleaningAlerts.map((alert, index) => (
+                      <article className={`alert ${alert.severity}`} key={`${alert.title}-${index}`}>
+                        <strong>{alert.title}</strong>
+                        <p>{alert.detail}</p>
+                      </article>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
+              {priorityAlerts.slice(0, 8).map((alert, index) => (
                 <article className={`alert ${alert.severity}`} key={`${alert.title}-${index}`}>
                   <strong>{alert.title}</strong>
                   <p>{alert.detail}</p>
@@ -1615,29 +1636,36 @@ function SetupList({
   onRemove?: (id: string) => void;
   onToggle: (id: string) => void;
 }) {
+  const activeCount = items.filter((item) => item.active).length;
+
   return (
-    <div className="setup-list">
-      <h3>{title}</h3>
+    <details className="setup-list">
+      <summary>
+        <h3>{title}</h3>
+        <span>{activeCount} active / {items.length} total</span>
+      </summary>
       {items.length === 0 ? (
         <p className="muted-line">Nothing set up yet.</p>
       ) : (
-        items.map((item) => (
-          <article className="setup-row" key={item.id}>
-            <span>{item.name}</span>
-            <div className="row-actions">
-              <button className="secondary-action" type="button" onClick={() => onToggle(item.id)}>
-                {item.active ? "Deactivate" : "Reactivate"}
-              </button>
-              {onRemove ? (
-                <button className="secondary-action danger-action" type="button" onClick={() => onRemove(item.id)}>
-                  Remove
+        <div className="setup-list-items">
+          {items.map((item) => (
+            <article className="setup-row" key={item.id}>
+              <span>{item.name}</span>
+              <div className="row-actions">
+                <button className="secondary-action" type="button" onClick={() => onToggle(item.id)}>
+                  {item.active ? "Deactivate" : "Reactivate"}
                 </button>
-              ) : null}
-            </div>
-          </article>
-        ))
+                {onRemove ? (
+                  <button className="secondary-action danger-action" type="button" onClick={() => onRemove(item.id)}>
+                    Remove
+                  </button>
+                ) : null}
+              </div>
+            </article>
+          ))}
+        </div>
       )}
-    </div>
+    </details>
   );
 }
 

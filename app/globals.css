@@ -408,6 +408,7 @@ p {
 
 .activity-list,
 .alert-list,
+.alert-summary-list,
 .account-list,
 .evidence-grid {
   display: grid;
@@ -546,6 +547,69 @@ p {
   padding: 12px;
 }
 
+.alert-summary-card,
+.setup-list {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.alert-summary-card summary,
+.setup-list summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  list-style: none;
+  padding: 12px;
+}
+
+.alert-summary-card summary::-webkit-details-marker,
+.setup-list summary::-webkit-details-marker {
+  display: none;
+}
+
+.alert-summary-card summary {
+  background: linear-gradient(135deg, rgba(46, 28, 66, 0.08), rgba(196, 44, 142, 0.12));
+}
+
+.alert-summary-card summary p,
+.setup-list summary span {
+  color: var(--muted);
+}
+
+.alert-summary-card summary span {
+  align-items: center;
+  background: var(--brand);
+  border-radius: 999px;
+  color: #fff;
+  display: inline-flex;
+  font-weight: 800;
+  height: 34px;
+  justify-content: center;
+  min-width: 34px;
+  padding: 0 10px;
+}
+
+.alert-summary-list,
+.setup-list-items {
+  border-top: 1px solid var(--line);
+  padding: 8px;
+}
+
+.setup-list {
+  margin-top: 10px;
+}
+
+.setup-list summary {
+  background: #fbf8ff;
+}
+
+.setup-list h3 {
+  margin: 0;
+}
+
 .alert.high {
   border-left-color: var(--red);
 }
@@ -638,19 +702,6 @@ p {
 .permission-grid input {
   min-height: 17px;
   width: 17px;
-}
-
-.setup-list {
-  border-top: 1px solid var(--line);
-  padding: 12px 0;
-}
-
-.setup-list:first-of-type {
-  border-top: 0;
-}
-
-.setup-list h3 {
-  margin-bottom: 8px;
 }
 
 .setup-row {
