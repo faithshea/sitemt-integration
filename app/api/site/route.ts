@@ -28,6 +28,8 @@ import {
 } from "@/lib/supabase-site";
 import type { Account, SiteState } from "@/lib/site-types";
 
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 async function requireSession(request: Request) {
   const supabase = getSupabaseAdmin();
 
@@ -68,8 +70,7 @@ export async function GET(request: Request) {
     routineTasks,
     submissions,
     issues,
-    handovers,
-    auditLogs
+    handovers
   ] = await Promise.all([
     supabase.from("site_accounts").select("id, display_name, role, permissions, active").order("display_name"),
     supabase.from("cleaning_tasks").select("*").order("created_at"),
@@ -80,9 +81,14 @@ export async function GET(request: Request) {
     supabase.from("routine_tasks").select("*").order("created_at"),
     supabase.from("check_submissions").select("*").order("submitted_at", { ascending: false }),
     supabase.from("issues").select("*").order("created_at", { ascending: false }),
-    supabase.from("handovers").select("*").order("created_at", { ascending: false }),
-    supabase.from("audit_logs").select("*").order("created_at", { ascending: false }).limit(100)
+    supabase.from("handovers").select("*").order("created_at", { ascending: false })
   ]);
+
+  const auditLogs = await supabase
+    .from("audit_logs")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(100);
 
   const firstError = [
     accounts,
@@ -94,8 +100,7 @@ export async function GET(request: Request) {
     routineTasks,
     submissions,
     issues,
-    handovers,
-    auditLogs
+    handovers
   ].find((result) => result.error)?.error;
 
   if (firstError) {
@@ -103,13 +108,11 @@ export async function GET(request: Request) {
   }
 
   const mappedSubmissions = await Promise.all(
-    (submissions.data ?? []).map(async (row) => {
+    (submissions.data ?? []).map(async (row, index) => {
       const submission = submissionFromRow(row);
-      if (!submission.photoName) return submission;
+      if (!submission.photoName || index > 25) return submission;
 
-      const { data } = await supabase.storage
-        .from("cleaning-evidence")
-        .createSignedUrl(submission.photoName, 60 * 60);
+      const { data } = await supabase.storage.from("cleaning-evidence").createSignedUrl(submission.photoName, 60 * 60);
 
       return {
         ...submission,
@@ -129,7 +132,7 @@ export async function GET(request: Request) {
     submissions: mappedSubmissions,
     issues: (issues.data ?? []).map(issueFromRow),
     handovers: (handovers.data ?? []).map(handoverFromRow),
-    auditLogs: (auditLogs.data ?? []).map(auditLogFromRow)
+    auditLogs: auditLogs.error ? [] : (auditLogs.data ?? []).map(auditLogFromRow)
   };
 
   return NextResponse.json({ state });
@@ -160,7 +163,7 @@ export async function PUT(request: Request) {
 
     if (isManagement) {
       await upsertRows("handovers", state.handovers.map((handover) => handoverToRow(handover, accounts)));
-      await upsertRows("audit_logs", state.auditLogs.map((log) => auditLogToRow(log, accounts)));
+      await upsertOptionalRows("audit_logs", state.auditLogs.map((log) => auditLogToRow(log, accounts)));
     }
 
     return NextResponse.json({ ok: true });
@@ -177,7 +180,7 @@ export async function PUT(request: Request) {
     }
 
     async function saveAccounts(nextAccounts: Account[]) {
-      for (const item of nextAccounts) {
+      for (const item of nextAccounts.filter((accountItem) => uuidPattern.test(accountItem.id))) {
         const row = accountToRow(item);
         const { data: existing, error: existingError } = await supabase
           .from("site_accounts")
@@ -218,6 +221,14 @@ export async function PUT(request: Request) {
       if (error) throw new Error(error.message);
     }
 
+    async function upsertOptionalRows(table: string, rows: Record<string, unknown>[]) {
+      if (rows.length === 0) return;
+
+      const { error } = await supabase.from(table).upsert(rows);
+
+      if (error && !isMissingTableError(error)) throw new Error(error.message);
+    }
+
     async function deleteMissingRows(table: string, idsToKeep: string[]) {
       const query =
         idsToKeep.length === 0
@@ -231,4 +242,10 @@ export async function PUT(request: Request) {
     const message = error instanceof Error ? error.message : "Could not save to Supabase.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+function isMissingTableError(error: { code?: string; message?: string }) {
+  const message = error.message?.toLowerCase() ?? "";
+
+  return error.code === "42P01" || message.includes("does not exist") || message.includes("could not find the table");
 }

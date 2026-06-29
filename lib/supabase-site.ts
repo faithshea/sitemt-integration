@@ -17,6 +17,12 @@ import type {
 
 export type SiteSessionAccount = Account;
 
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function accountForeignKey(account?: Account) {
+  return account && uuidPattern.test(account.id) ? account.id : null;
+}
+
 export function accountFromRow(row: {
   id: string;
   display_name: string;
@@ -248,7 +254,7 @@ export function submissionToRow(submission: Submission, accounts: Account[]) {
     area: submission.area,
     item_id: submission.itemId,
     item_name: submission.itemName,
-    staff_account_id: staffAccount?.id ?? null,
+    staff_account_id: accountForeignKey(staffAccount),
     staff_name: submission.staffName,
     submitted_at: submission.submittedAt,
     measured_value: submission.value ?? null,
@@ -258,7 +264,7 @@ export function submissionToRow(submission: Submission, accounts: Account[]) {
     missed_reason: submission.missedReason ?? null,
     status: submission.status,
     reviewed_at: submission.reviewedAt ?? null,
-    reviewed_by_account_id: reviewer?.id ?? null,
+    reviewed_by_account_id: accountForeignKey(reviewer),
     reviewed_by_name: submission.reviewedBy ?? null,
     corrective_action: submission.correctiveAction ?? null
   };
@@ -273,7 +279,7 @@ export function issueToRow(issue: Issue, accounts: Account[]) {
     detail: issue.detail,
     priority: issue.priority,
     status: issue.status,
-    reported_by_account_id: reporter?.id ?? null,
+    reported_by_account_id: accountForeignKey(reporter),
     reported_by_name: issue.reportedBy,
     created_at: issue.createdAt,
     resolved_at: issue.resolvedAt ?? null,
@@ -286,7 +292,7 @@ export function handoverToRow(handover: Handover, accounts: Account[]) {
 
   return {
     id: handover.id,
-    manager_account_id: manager?.id ?? null,
+    manager_account_id: accountForeignKey(manager),
     manager_name: handover.managerName,
     summary: handover.summary,
     unresolved_notes: handover.unresolvedNotes,
@@ -299,7 +305,7 @@ export function auditLogToRow(log: AuditLog, accounts: Account[]) {
 
   return {
     id: log.id,
-    actor_account_id: actor?.id ?? null,
+    actor_account_id: accountForeignKey(actor),
     actor_name: log.actorName,
     action: log.action,
     detail: log.detail,

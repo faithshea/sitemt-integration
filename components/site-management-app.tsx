@@ -57,6 +57,7 @@ type SettingsTab = "setup" | "accounts" | "active" | "reports";
 type StateSetter = React.Dispatch<React.SetStateAction<SiteState>>;
 
 const storageKey = "lol-site-management-state-v2";
+const remoteFetchTimeoutMs = 12000;
 
 export function SiteManagementApp({ screen }: { screen: Screen }) {
   const [state, setState] = useState<SiteState>(initialSiteState);
@@ -94,7 +95,7 @@ export function SiteManagementApp({ screen }: { screen: Screen }) {
   const loadRemoteState = useCallback(async (token: string) => {
     setSessionToken(token);
     const remoteState = await fetchRemoteState(token);
-    if (remoteState) setState(normalizeSiteState(remoteState));
+    if (remoteState) setState(normalizeSiteState(remoteState, { includeStarterAccounts: false }));
   }, []);
 
   const clearRemoteSession = useCallback(() => {
@@ -175,7 +176,10 @@ function PinGate({
   screen: Exclude<Screen, "home">;
   children: (account: Account, logout: () => void) => React.ReactNode;
 }) {
-  const eligibleAccounts = accounts.filter((account) => accountIsEligible(account, screen));
+  const eligibleAccounts = useMemo(
+    () => accounts.filter((account) => accountIsEligible(account, screen)),
+    [accounts, screen]
+  );
   const [accountId, setAccountId] = useState(eligibleAccounts[0]?.id ?? "");
   const [pin, setPin] = useState("");
   const [account, setAccount] = useState<Account | null>(null);
@@ -225,6 +229,12 @@ function PinGate({
     if (savedAccount) setAccount(savedAccount);
   }, [eligibleAccounts, onAuthenticated, remoteEnabled, screen, sessionKey]);
 
+  useEffect(() => {
+    if (eligibleAccounts.length > 0 && !eligibleAccounts.some((item) => item.id === accountId)) {
+      setAccountId(eligibleAccounts[0].id);
+    }
+  }, [accountId, eligibleAccounts]);
+
   const submitPin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const selected = eligibleAccounts.find((item) => item.id === accountId);
@@ -268,6 +278,7 @@ function PinGate({
     setPin("");
     setAccount(null);
     onLogout();
+    window.location.assign("/");
   };
 
   if (account) {
@@ -311,7 +322,7 @@ function PinGate({
             />
           </label>
           {error ? <p className="form-error">{error}</p> : null}
-          <button>Unlock {screen === "staff" ? "staff checks" : screen === "dashboard" ? "dashboard display" : screen === "manager-checks" ? "manager checks" : "dashboard"}</button>
+          <button>Unlock {screen === "staff" ? "staff checks" : screen === "dashboard" ? "dashboard display" : screen === "manager-checks" ? "manager checks" : "management"}</button>
         </form>
       </section>
     </main>
@@ -1888,11 +1899,13 @@ function permissionsForRole(role: AccountRole): AccountPermissions {
   };
 }
 
-function mergeAccounts(accounts: Account[]) {
+function mergeAccounts(accounts: Account[], includeStarterAccounts = true) {
   const byId = new Map(accounts.map((account) => [account.id, account]));
-  initialSiteState.accounts.forEach((account) => {
-    if (!byId.has(account.id)) byId.set(account.id, account);
-  });
+  if (includeStarterAccounts) {
+    initialSiteState.accounts.forEach((account) => {
+      if (!byId.has(account.id)) byId.set(account.id, account);
+    });
+  }
 
   return Array.from(byId.values()).map((account) => ({
     ...account,
@@ -1905,11 +1918,14 @@ function mergeAccounts(accounts: Account[]) {
 function accountIsEligible(account: Account, screen: Exclude<Screen, "home">) {
   if (!account.active) return false;
   if (screen === "dashboard") return account.role === "dashboard" && account.permissions.canAccessDashboard;
-  if (screen === "management") return account.permissions.canAccessDashboard;
+  if (screen === "management") return account.role === "management" && account.permissions.canAccessDashboard;
   if (screen === "settings") return account.permissions.canManageSettings;
   if (screen === "manager-checks") return account.permissions.canManageSettings;
-  return Object.entries(account.permissions).some(
-    ([key, value]) => key.startsWith("canComplete") && value
+  return (
+    account.role === "staff" &&
+    Object.entries(account.permissions).some(
+      ([key, value]) => key.startsWith("canComplete") && value
+    )
   );
 }
 
@@ -2020,8 +2036,8 @@ function uniqueDueColdUnits(entries: { unit: ColdUnit; shift: Shift }[]) {
   return Array.from(new Map(entries.map((entry) => [entry.unit.id, entry.unit])).values());
 }
 
-function periodStart(frequency: "daily" | "weekly" | "monthly") {
-  if (frequency === "weekly") return startOfWeek();
+function periodStart(frequency: CleaningTask["frequency"] | RoutineTask["frequency"]) {
+  if (frequency === "weekly" || frequency === "twice_weekly" || frequency === "four_weekly") return startOfWeek();
   if (frequency === "monthly") return startOfMonth();
   return new Date(new Date().setHours(0, 0, 0, 0));
 }
@@ -2177,7 +2193,7 @@ async function downloadWorkbook({
 
 async function loadAccountOptions() {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 8000);
+  const timeout = window.setTimeout(() => controller.abort(), remoteFetchTimeoutMs);
 
   try {
     const response = await fetch("/api/site/accounts", {
@@ -2186,7 +2202,7 @@ async function loadAccountOptions() {
     });
     if (!response.ok) return null;
     const data = await response.json();
-    return normalizeSiteState({ ...initialSiteState, accounts: data.accounts }).accounts as Account[];
+    return normalizeSiteState({ ...initialSiteState, accounts: data.accounts }, { includeStarterAccounts: false }).accounts as Account[];
   } catch {
     return null;
   } finally {
@@ -2196,11 +2212,14 @@ async function loadAccountOptions() {
 
 async function remoteLogin(accountId: string, pin: string) {
   try {
+    const timeout = createBrowserTimeout();
     const response = await fetch("/api/site/login", {
       body: JSON.stringify({ accountId, pin }),
       headers: { "Content-Type": "application/json" },
-      method: "POST"
+      method: "POST",
+      signal: timeout.signal
     });
+    timeout.clear();
 
     if (!response.ok) return null;
     return (await response.json()) as { account: Account; sessionToken: string };
@@ -2210,21 +2229,35 @@ async function remoteLogin(accountId: string, pin: string) {
 }
 
 async function restoreRemoteSession(sessionToken: string) {
-  const response = await fetch("/api/site/session", {
-    cache: "no-store",
-    headers: { "x-site-session": sessionToken }
-  });
+  try {
+    const timeout = createBrowserTimeout();
+    const response = await fetch("/api/site/session", {
+      cache: "no-store",
+      headers: { "x-site-session": sessionToken },
+      signal: timeout.signal
+    });
+    timeout.clear();
 
-  if (!response.ok) return null;
-  const data = await response.json();
-  return data.account as Account;
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.account as Account;
+  } catch {
+    return null;
+  }
 }
 
 async function remoteLogout(sessionToken: string) {
-  await fetch("/api/site/session", {
-    headers: { "x-site-session": sessionToken },
-    method: "DELETE"
-  });
+  try {
+    const timeout = createBrowserTimeout(3000);
+    await fetch("/api/site/session", {
+      headers: { "x-site-session": sessionToken },
+      method: "DELETE",
+      signal: timeout.signal
+    });
+    timeout.clear();
+  } catch {
+    // Local session clearing is enough for logout; the remote session can expire naturally.
+  }
 }
 
 function clearStoredSiteSessions() {
@@ -2242,10 +2275,13 @@ function clearStoredSiteSessions() {
 
 async function fetchRemoteState(sessionToken: string) {
   try {
+    const timeout = createBrowserTimeout();
     const response = await fetch("/api/site", {
       cache: "no-store",
-      headers: { "x-site-session": sessionToken }
+      headers: { "x-site-session": sessionToken },
+      signal: timeout.signal
     });
+    timeout.clear();
 
     if (!response.ok) return null;
     const data = await response.json();
@@ -2253,6 +2289,16 @@ async function fetchRemoteState(sessionToken: string) {
   } catch {
     return null;
   }
+}
+
+function createBrowserTimeout(timeoutMs = remoteFetchTimeoutMs) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  return {
+    signal: controller.signal,
+    clear: () => window.clearTimeout(timeout)
+  };
 }
 
 async function saveRemoteState(state: SiteState, sessionToken: string) {
@@ -2292,11 +2338,16 @@ async function uploadCleaningPhoto(file: File, sessionToken: string) {
   return data.path as string;
 }
 
-function normalizeSiteState(state: SiteState): SiteState {
+function normalizeSiteState(
+  state: SiteState,
+  options: { includeStarterAccounts?: boolean } = {}
+): SiteState {
+  const includeStarterAccounts = options.includeStarterAccounts ?? true;
+
   return {
     ...initialSiteState,
     ...state,
-    accounts: mergeAccounts(state.accounts ?? []),
+    accounts: mergeAccounts(state.accounts ?? [], includeStarterAccounts),
     cleaningTasks: (state.cleaningTasks ?? []).map((task) => ({
       ...task,
       frequency: normalizeCleaningFrequency(task.frequency),
