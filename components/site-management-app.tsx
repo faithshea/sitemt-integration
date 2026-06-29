@@ -18,6 +18,7 @@ import {
   nextWeeklyItem,
   readableDate,
   startOfMonth,
+  startOfTradingDay,
   startOfWeek
 } from "@/lib/site-logic";
 import type {
@@ -648,19 +649,31 @@ function StaffPage({
 }) {
   const [cleaningPhoto, setCleaningPhoto] = useState<Record<string, File | null>>({});
   const [flash, setFlash] = useState<Flash>(null);
+  const [pendingSubmissions, setPendingSubmissions] = useState<Submission[]>([]);
   const [section, setSection] = useState<StaffSection>("home");
-  const nextFireZone = nextWeeklyItem(state.fireZones, state.submissions, "fire");
+  const allSubmissions = useMemo(() => {
+    const savedIds = new Set(state.submissions.map((submission) => submission.id));
+    return [
+      ...pendingSubmissions.filter((submission) => !savedIds.has(submission.id)),
+      ...state.submissions
+    ];
+  }, [pendingSubmissions, state.submissions]);
+  const nextFireZone = nextWeeklyItem(state.fireZones, allSubmissions, "fire");
   const nextRemote = nextWeeklyItem(
     state.staffGuardRemotes,
-    state.submissions,
+    allSubmissions,
     "staffguard"
   );
-  const dueCleaningTasks = dueCleaningForAccount(state, account);
-  const dueColdEntries = dueColdForAccount(state, account);
-  const openingTasks = dueRoutineForAccount(state, account, "opening");
-  const closingTasks = dueRoutineForAccount(state, account, "closing");
-  const safeTasks = dueRoutineForAccount(state, account, "safe");
-  const managementTasks = dueRoutineForAccount(state, account, "management");
+  const visibleState = useMemo(
+    () => ({ ...state, submissions: allSubmissions }),
+    [allSubmissions, state]
+  );
+  const dueCleaningTasks = dueCleaningForAccount(visibleState, account);
+  const dueColdEntries = dueColdForAccount(visibleState, account);
+  const openingTasks = dueRoutineForAccount(visibleState, account, "opening");
+  const closingTasks = dueRoutineForAccount(visibleState, account, "closing");
+  const safeTasks = dueRoutineForAccount(visibleState, account, "safe");
+  const managementTasks = dueRoutineForAccount(visibleState, account, "management");
   const todayCount =
     dueCleaningTasks.length +
     dueColdEntries.length +
@@ -671,35 +684,54 @@ function StaffPage({
     Number(Boolean(nextFireZone && account.permissions.canCompleteFire)) +
     Number(Boolean(nextRemote && account.permissions.canCompleteStaffGuard));
 
+  useEffect(() => {
+    setPendingSubmissions((current) =>
+      current.filter(
+        (pendingSubmission) =>
+          !state.submissions.some((submission) => submission.id === pendingSubmission.id)
+      )
+    );
+  }, [state.submissions]);
+
   const addSubmission = (submission: Omit<Submission, "id" | "submittedAt">) => {
+    const nextSubmission: Submission = {
+      ...submission,
+      id: makeId("log"),
+      submittedAt: new Date().toISOString()
+    };
+    setPendingSubmissions((current) => [nextSubmission, ...current]);
     setState((current) => ({
       ...current,
       submissions: [
-        {
-          ...submission,
-          id: makeId("log"),
-          submittedAt: new Date().toISOString()
-        },
+        nextSubmission,
         ...current.submissions
       ]
     }));
     setFlash({ tone: submission.status === "ok" ? "success" : "warning", text: "Submission saved." });
+    return nextSubmission;
   };
 
   const completeCleaningTask = async (task: CleaningTask) => {
     const photo = cleaningPhoto[task.id];
-    if (!photo) return;
-    const uploadedPath = sessionToken ? await uploadCleaningPhoto(photo, sessionToken) : null;
-
-    addSubmission({
+    const submission = addSubmission({
       area: "cleaning",
       itemId: task.id,
       itemName: task.name,
       staffName: account.name,
-      photoName: uploadedPath ?? photo.name,
+      photoName: sessionToken ? undefined : photo?.name,
       status: "ok"
     });
     setCleaningPhoto((current) => ({ ...current, [task.id]: null }));
+    if (!photo || !sessionToken) return;
+
+    const uploadedPath = await uploadCleaningPhoto(photo, sessionToken);
+    if (!uploadedPath) return;
+    setState((current) => ({
+      ...current,
+      submissions: current.submissions.map((item) =>
+        item.id === submission.id ? { ...item, photoName: uploadedPath } : item
+      )
+    }));
   };
 
   const submitFood = (event: FormEvent<HTMLFormElement>) => {
@@ -843,12 +875,12 @@ function StaffPage({
 
           <section className="staff-grid">
         {section === "cleaning" && account.permissions.canCompleteCleaning ? (
-        <TaskSection title="Cleaning" detail="Photo required">
+        <TaskSection title="Cleaning" detail="Photo optional">
           {dueCleaningTasks.length === 0 ? (
-            <EmptyState title="No cleaning due" text="Completed weekly and monthly checks will return when they are due again." />
+            <EmptyState title="No cleaning due" text="Completed cleaning checks will return when they are due again." />
           ) : (
             dueCleaningTasks.map((task) => {
-              const latest = latestSubmission(state.submissions, "cleaning", task.id);
+              const latest = latestSubmission(allSubmissions, "cleaning", task.id);
               return (
                 <article className="staff-task" key={task.id}>
                   <div>
@@ -871,7 +903,6 @@ function StaffPage({
                     <p className="photo-preview">Photo attached: {cleaningPhoto[task.id]?.name}</p>
                   ) : null}
                   <button
-                    disabled={!cleaningPhoto[task.id]}
                     onClick={() => void completeCleaningTask(task)}
                     type="button"
                   >
@@ -892,7 +923,7 @@ function StaffPage({
             item={nextFireZone}
             emptyText="No fire zones are set up."
             area="fire"
-            submissions={state.submissions}
+            submissions={allSubmissions}
             staffName={account.name}
             addSubmission={addSubmission}
           />
@@ -903,7 +934,7 @@ function StaffPage({
             item={nextRemote}
             emptyText="No StaffGuard remotes are set up."
             area="staffguard"
-            submissions={state.submissions}
+            submissions={allSubmissions}
             staffName={account.name}
             addSubmission={addSubmission}
           />
@@ -953,19 +984,19 @@ function StaffPage({
         ) : null}
 
         {section === "opening" && account.permissions.canCompleteOpening ? (
-          <RoutineTaskSection title="Opening checks" tasks={openingTasks} submissions={state.submissions} empty="No opening checks set." onComplete={submitRoutineTask} />
+          <RoutineTaskSection title="Opening checks" tasks={openingTasks} submissions={allSubmissions} empty="No opening checks set." onComplete={submitRoutineTask} />
         ) : null}
 
         {section === "closing" && account.permissions.canCompleteClosing ? (
-          <RoutineTaskSection title="Closing checks" tasks={closingTasks} submissions={state.submissions} empty="No closing checks set." onComplete={submitRoutineTask} />
+          <RoutineTaskSection title="Closing checks" tasks={closingTasks} submissions={allSubmissions} empty="No closing checks set." onComplete={submitRoutineTask} />
         ) : null}
 
         {section === "safe" && account.permissions.canCompleteSafe ? (
-          <RoutineTaskSection title="Safe checks" tasks={safeTasks} submissions={state.submissions} empty="No safe checks set." onComplete={submitRoutineTask} />
+          <RoutineTaskSection title="Safe checks" tasks={safeTasks} submissions={allSubmissions} empty="No safe checks set." onComplete={submitRoutineTask} />
         ) : null}
 
         {section === "management" && isManagerChecks ? (
-          <RoutineTaskSection title="Management checks" tasks={managementTasks} submissions={state.submissions} empty="No management checks set." onComplete={submitRoutineTask} />
+          <RoutineTaskSection title="Management checks" tasks={managementTasks} submissions={allSubmissions} empty="No management checks set." onComplete={submitRoutineTask} />
         ) : null}
 
         {section === "missed" ? (
@@ -2067,7 +2098,7 @@ function uniqueDueColdUnits(entries: { unit: ColdUnit; shift: Shift }[]) {
 function periodStart(frequency: CleaningTask["frequency"] | RoutineTask["frequency"]) {
   if (frequency === "weekly" || frequency === "twice_weekly" || frequency === "four_weekly") return startOfWeek();
   if (frequency === "monthly") return startOfMonth();
-  return new Date(new Date().setHours(0, 0, 0, 0));
+  return startOfTradingDay();
 }
 
 async function exportSubmissions(state: SiteState) {

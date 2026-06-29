@@ -35,6 +35,13 @@ export function startOfMonth(date = new Date()) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
 
+export function startOfTradingDay(date = new Date()) {
+  const result = new Date(date);
+  result.setHours(6, 0, 0, 0);
+  if (date < result) result.setDate(result.getDate() - 1);
+  return result;
+}
+
 export function isSameDay(a: Date, b: Date) {
   return (
     a.getFullYear() === b.getFullYear() &&
@@ -75,13 +82,13 @@ export function hasColdShiftToday(
   itemId: string,
   shift: Shift
 ) {
-  const today = new Date();
+  const tradingDayStart = startOfTradingDay();
   return submissions.some(
     (submission) =>
       submission.area === "cold" &&
       submission.itemId === itemId &&
       submission.shift === shift &&
-      isSameDay(new Date(submission.submittedAt), today)
+      new Date(submission.submittedAt) >= tradingDayStart
   );
 }
 
@@ -158,7 +165,7 @@ export function buildAlerts(state: SiteState) {
           ? monthStart
           : task.frequency === "weekly"
             ? weekStart
-            : new Date(new Date().setHours(0, 0, 0, 0));
+            : startOfTradingDay();
 
       if (!hasSubmissionSince(state.submissions, task.area, task.id, since)) {
         alerts.push({
@@ -241,7 +248,7 @@ export function cleaningTaskDue(
   weekStart = startOfWeek(),
   monthStart = startOfMonth()
 ) {
-  const dayStart = new Date(new Date().setHours(0, 0, 0, 0));
+  const dayStart = startOfTradingDay();
   const since =
     task.frequency === "monthly"
       ? monthStart
