@@ -82,15 +82,20 @@ export async function syncState(state,actor){
     if(!t.closed&&(t.items||[]).length){
       t.saleId=t.saleId||uuid();
       r=await supabase.from('sales').upsert({id:t.saleId,status:'open',payment_method:'tab',customer_tab_id:t.id,subtotal_pence:pence(t.amount),discount_pence:0,tax_pence:0,total_pence:pence(t.amount),created_by:staffId,notes:'Open customer tab'});if(r.error)fail(r.error);
-      for(const item of t.items){if(!String(item.id||'').includes('-'))item.id=uuid();const productId=state.products.some(p=>p.id===item.productId)?item.productId:null;r=await supabase.from('transaction_items').upsert({id:item.id,sale_id:t.saleId,product_id:productId,product_name:item.name,quantity:1,unit_price_pence:pence(item.price),discount_pence:item.comp?pence(item.price):0,tax_pence:0,line_total_pence:item.comp?0:pence(item.price)});if(r.error)fail(r.error)}
+      for(const item of t.items){if(!String(item.id||'').includes('-'))item.id=uuid();const productId=state.products.some(p=>p.id===item.productId)?item.productId:null;r=await supabase.from('transaction_items').upsert({id:item.id,sale_id:t.saleId,product_id:productId,product_name:item.name,quantity:1,unit_price_pence:pence(item.price),discount_pence:item.comp?pence(item.price):0,tax_pence:0,line_total_pence:item.comp?0:pence(item.price)},{onConflict:'id',ignoreDuplicates:true});if(r.error)fail(r.error)}
     }
   }
 
+  const saleIds=state.sales.map(s=>s.id).filter(id=>String(id).includes('-'));
+  const existingSales=new Map();
+  if(saleIds.length){r=await supabase.from('sales').select('id,status').in('id',saleIds);if(r.error)fail(r.error);for(const row of r.data||[])existingSales.set(row.id,row.status)}
   for(const s of state.sales){
     if(!String(s.id).includes('-'))s.id=uuid();
     const method=String(s.method||'').toLowerCase();
-    r=await supabase.from('sales').upsert({id:s.id,status:'completed',payment_method:method==='cash'?'cash':method==='card'?'card':s.tabId?'tab':'mixed',customer_tab_id:s.tabId||null,subtotal_pence:pence(s.total),discount_pence:0,tax_pence:0,total_pence:pence(s.total),created_by:staffId,completed_by:staffId,completed_at:new Date().toISOString(),notes:s.source||null});if(r.error)fail(r.error);
-    for(const item of s.items||[]){if(!String(item.id||'').includes('-'))item.id=uuid();const productId=state.products.some(p=>p.id===item.productId)?item.productId:null;r=await supabase.from('transaction_items').upsert({id:item.id,sale_id:s.id,product_id:productId,product_name:item.name,quantity:1,unit_price_pence:pence(item.price),discount_pence:item.comp?pence(item.price):0,tax_pence:0,line_total_pence:item.comp?0:pence(item.price)});if(r.error)fail(r.error)}
+    const saleRow={id:s.id,status:'completed',payment_method:method==='cash'?'cash':method==='card'?'card':s.tabId?'tab':'mixed',customer_tab_id:s.tabId||null,subtotal_pence:pence(s.total),discount_pence:0,tax_pence:0,total_pence:pence(s.total),created_by:staffId,completed_by:staffId,completed_at:new Date().toISOString(),notes:s.source||null};
+    if(!existingSales.has(s.id)){r=await supabase.from('sales').insert(saleRow);if(r.error)fail(r.error);existingSales.set(s.id,'completed')}
+    else if(s.tabId&&existingSales.get(s.id)==='open'){r=await supabase.from('sales').update(saleRow).eq('id',s.id).eq('status','open');if(r.error)fail(r.error);existingSales.set(s.id,'completed')}
+    for(const item of s.items||[]){if(!String(item.id||'').includes('-'))item.id=uuid();const productId=state.products.some(p=>p.id===item.productId)?item.productId:null;r=await supabase.from('transaction_items').upsert({id:item.id,sale_id:s.id,product_id:productId,product_name:item.name,quantity:1,unit_price_pence:pence(item.price),discount_pence:item.comp?pence(item.price):0,tax_pence:0,line_total_pence:item.comp?0:pence(item.price)},{onConflict:'id',ignoreDuplicates:true});if(r.error)fail(r.error)}
   }
 
   if(state.trade?.status==='open'){
