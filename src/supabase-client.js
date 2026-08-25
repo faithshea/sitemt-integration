@@ -23,7 +23,7 @@ export async function pinLogin(pin){
   if(!response.ok)throw new Error(body.error||'PIN not recognised. Try again.');
   const {error}=await supabase.auth.setSession({access_token:body.session.access_token,refresh_token:body.session.refresh_token});
   if(error)fail(error);
-  return {id:body.staff.id,name:body.staff.displayName,role:body.staff.role==='cashier'?'Staff':'Manager',permissions:body.staff.role==='cashier'?[]:['stock','reports','products','staff','comp']};
+  return {id:body.staff.id,name:body.staff.displayName,role:body.staff.role==='cashier'?'Staff':'Manager',permissions:body.staff.role==='cashier'?(body.staff.permissions||[]):['stock','reports','products','staff','comp']};
 }
 
 export async function signOut(){await supabase.auth.signOut({scope:'local'})}
@@ -41,11 +41,19 @@ export async function importBrowserProducts(seedProducts){
   return body;
 }
 
-export async function createStaff({name,pin,role}){
+export async function createStaff({name,pin,role,permissions=[]}){
   const {data:{session}}=await supabase.auth.getSession();
-  const response=await fetch(`${SUPABASE_URL}/functions/v1/manage-staff`,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':`Bearer ${session.access_token}`},body:JSON.stringify({displayName:name,pin,role:role==='Manager'?'manager':'cashier'})});
+  const response=await fetch(`${SUPABASE_URL}/functions/v1/manage-staff`,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':`Bearer ${session.access_token}`},body:JSON.stringify({action:'create',displayName:name,pin,role:role==='Manager'?'manager':'cashier',permissions})});
   const body=await response.json().catch(()=>({}));
   if(!response.ok)throw new Error(body.error||'Could not create staff');
+  return body.staff;
+}
+
+export async function updateStaff({id,name,role,active,permissions=[]}){
+  const {data:{session}}=await supabase.auth.getSession();
+  const response=await fetch(`${SUPABASE_URL}/functions/v1/manage-staff`,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':`Bearer ${session.access_token}`},body:JSON.stringify({action:'update',staffId:id,displayName:name,role:role==='Manager'?'manager':'cashier',active,permissions})});
+  const body=await response.json().catch(()=>({}));
+  if(!response.ok)throw new Error(body.error||'Could not update staff');
   return body.staff;
 }
 
@@ -61,7 +69,7 @@ export async function loadState(){
   const latestMachine=floats.filter(x=>x.till_name==='Machine CM').sort((a,b)=>new Date(b.opened_at)-new Date(a.opened_at))[0];
   const latestPool=floats.filter(x=>x.till_name==='Pool').sort((a,b)=>new Date(b.opened_at)-new Date(a.opened_at))[0];
   return {
-    users:staff.map(x=>({id:x.id,name:x.display_name,role:x.role==='cashier'?'Staff':'Manager',permissions:x.role==='cashier'?[]:['stock','reports','products','staff','comp']})),
+    users:staff.map(x=>({id:x.id,name:x.display_name,role:x.role==='cashier'?'Staff':'Manager',active:x.active,permissions:x.role==='cashier'?(x.permissions||[]):['stock','reports','products','staff','comp']})),
     products:products.map(x=>({id:x.id,sku:x.sku,name:x.name,price:pounds(x.price_pence),area:x.sales_area||'Drinks',sub:x.subcategory||x.category||'Other',stock:Number(x.stock_quantity),emoji:x.emoji||'✨',active:x.active})),
     sales:mappedSales, cashMatches:mappedPromotions.filter(x=>x.kind==='cashMatch'), bingoCredits:mappedPromotions.filter(x=>x.kind==='bingoCredit'),
     customerTabs:tabs.map(x=>{const openSale=mappedSales.find(s=>s.tabId===x.id&&s.status==='open');return {id:x.id,saleId:openSale?.id,customer:x.customer_name,item:x.reference||'',amount:pounds(x.balance_pence),date:new Date(x.opened_at).toLocaleString('en-GB'),by:staff.find(s=>s.id===x.opened_by)?.display_name||'Staff',closed:x.status!=='open',closedAt:x.closed_at,items:openSale?.items||[]}}),
