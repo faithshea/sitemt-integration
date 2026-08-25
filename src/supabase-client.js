@@ -9,6 +9,13 @@ const pence=n=>Math.round(Number(n||0)*100);
 const pounds=n=>Number(n||0)/100;
 const safeJson=value=>{try{return typeof value==='string'?JSON.parse(value):value}catch{return {}}};
 const fail=error=>{throw new Error(error?.message||'Supabase request failed')};
+const toIso=value=>{
+  if(!value)return new Date().toISOString();
+  const direct=new Date(value);if(!Number.isNaN(direct.getTime()))return direct.toISOString();
+  const match=String(value).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if(match){const [,day,month,year,hour,minute,second='0']=match;return new Date(Number(year),Number(month)-1,Number(day),Number(hour),Number(minute),Number(second)).toISOString()}
+  throw new Error('A saved date could not be converted. Please sign out and back in, then retry.');
+};
 
 export async function pinLogin(pin){
   const response=await fetch(`${SUPABASE_URL}/functions/v1/pin-login`,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY},body:JSON.stringify({pin})});
@@ -78,7 +85,7 @@ export async function syncState(state,actor){
 
   for(const t of state.customerTabs){
     if(!String(t.id).includes('-'))t.id=uuid();
-    r=await supabase.from('customer_tabs').upsert({id:t.id,customer_name:t.customer,reference:t.item||null,status:t.closed?'settled':'open',balance_pence:pence(t.amount),opened_by:staffId,closed_by:t.closed?staffId:null,opened_at:t.openedAt||new Date().toISOString(),closed_at:t.closed?(t.closedAt||new Date().toISOString()):null,notes:null});if(r.error)fail(r.error);
+    r=await supabase.from('customer_tabs').upsert({id:t.id,customer_name:t.customer,reference:t.item||null,status:t.closed?'settled':'open',balance_pence:pence(t.amount),opened_by:staffId,closed_by:t.closed?staffId:null,opened_at:toIso(t.openedAt||t.date),closed_at:t.closed?toIso(t.closedAt):null,notes:null});if(r.error)fail(r.error);
     if(!t.closed&&(t.items||[]).length){
       t.saleId=t.saleId||uuid();
       r=await supabase.from('sales').upsert({id:t.saleId,status:'open',payment_method:'tab',customer_tab_id:t.id,subtotal_pence:pence(t.amount),discount_pence:0,tax_pence:0,total_pence:pence(t.amount),created_by:staffId,notes:'Open customer tab'});if(r.error)fail(r.error);
